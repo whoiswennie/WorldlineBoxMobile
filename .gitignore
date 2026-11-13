@@ -1,0 +1,14 @@
+.tools/
+.dart_tool/
+.packages
+.flutter-plugins-dependencies
+build/
+dist/
+android/local.properties
+android/key.properties
+android/app/src/debug/assets/pet-models/
+android/app/src/main/assets/pet-ringtones/
+*.jks
+*.keystore
+.idea/
+*.iml
