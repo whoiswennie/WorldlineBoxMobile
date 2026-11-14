@@ -6,7 +6,8 @@ param(
     [uri] $Proxy,
     [string] $Device,
     [switch] $Update,
-    [switch] $Release
+    [switch] $Release,
+    [switch] $IncludeLocalModel
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,7 +36,7 @@ function Copy-CallRingtones {
     $target = Join-Path $root 'android\app\src\main\assets\pet-ringtones'
     New-Item -ItemType Directory -Force -Path $target | Out-Null
     Copy-Item -LiteralPath (Join-Path $source 'ringtone.wav') -Destination (Join-Path $target 'common.wav') -Force
-    Copy-Item -LiteralPath (Join-Path $source 'ringtones\dafeiyu-let-me-go.ogg') -Destination (Join-Path $target 'dafeiyu.ogg') -Force
+    Copy-Item -LiteralPath (Join-Path $source 'ringtones\dafeiyu.ogg') -Destination (Join-Path $target 'dafeiyu.ogg') -Force
 }
 
 if ($Proxy) {
@@ -99,7 +100,7 @@ switch ($Action) {
     'Dev' {
         Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
-        Invoke-Checked node @('scripts/stage-pet-models.mjs')
+        if ($IncludeLocalModel) { Invoke-Checked node @('scripts/stage-pet-models.mjs') }
         if (!$Device) {
             $adb = Join-Path $androidRoot 'platform-tools\adb.exe'
             $targets = @(& $adb devices | Where-Object { $_ -match '^([^\s]+)\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
@@ -116,7 +117,10 @@ switch ($Action) {
         $mode = if ($Release) { 'release' } else { 'debug' }
         Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
-        if (!$Release) { Invoke-Checked node @('scripts/stage-pet-models.mjs') }
+        if ($IncludeLocalModel) {
+            if ($Release) { throw 'Local models are for private debug builds.' }
+            Invoke-Checked node @('scripts/stage-pet-models.mjs')
+        }
         Invoke-Checked $flutter @('build', 'apk', "--$mode")
         $output = Join-Path $root 'dist'
         New-Item -ItemType Directory -Force -Path $output | Out-Null

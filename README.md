@@ -2,8 +2,10 @@
 
 WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
+[下载 Android 0.1.0 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.0) · [下载 Windows 0.1.0 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.0) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+
 - 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
-- 竖屏桌宠通话支持 Live2D、从手机导入背景和 DeepSeek 流式语音。角色口型按实际播放的音频驱动。
+- 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。公开版以头像显示伙伴，配置了本地 Live2D 模型的私人构建可用播放中的音频驱动口型。
 - 手机缓存近期会话及本机待发消息。连接恢复时重试待发消息，并从已确认的上传位置继续传文件。
 
 ## 语音
@@ -24,13 +26,15 @@ WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/who
 
 三个脚本均支持 `-Proxy http://127.0.0.1:7897`。发布签名使用本地的 `android/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 环境交付 Android APK，iOS 构建需要 macOS 和相应签名环境。
 
-从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。打包私人测试 APK 前，在桌面仓库执行 `git lfs pull` 取得模型二进制。模型会由脚本从已有的本地文件打包进 APK。
+从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。私人测试构建可从作者渠道取得模型，按[桌面端本地素材说明](https://github.com/whoiswennie/WorldlineBox/blob/main/public/companion-call/NOTICE.md)暂存到相邻仓库，再给开发或打包脚本传入 `-IncludeLocalModel`。
+
+GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android 可能要求先卸载调试版再安装，此操作会清除本机配对及缓存，需重新扫码。
 
 ## 扫码连接
 
-1. 用更新后的 Windows x64 版 WorldlineBox 打开「设置 → 远程连接」，点「显示配对二维码」。Windows 安装包内置公网连接组件，开发版也可自动下载。
-2. 手机安装 `dist/WorldlineBoxMobile-debug.apk`，打开 App，点「扫描二维码」。手机保存设备凭据，后续在入口可用期间会自动连接。
-3. 电脑端可关闭服务、断开设备、允许重连或删除授权。删除后需要重新扫码。
+1. 安装 Windows x64 版 WorldlineBox，在启动器选择共享 DSH 实例，在「设置 → 全局模型」配置聊天模型。先在电脑验证一次伙伴回复。
+2. 电脑打开「设置 → 远程连接」，点「显示配对二维码」。手机从 Release 下载并安装 `WorldlineBoxMobile.apk`，打开 App 扫码。手机保存设备凭据，在入口可用期间自动连接。
+3. 打开伙伴聊天，发送文字或通过「＋」选择文件。伙伴在电脑完成后，可在手机打开或保存交付的附件。电脑端可以暂停设备、允许重连或撤销授权。撤销后需要重新扫码。
 
 从源码启动电脑端时，使用相邻 `WorldlineBox` 项目中的 `02-Start-Development.bat`。也可以用该项目的 Windows 安装器 `out/make/inno/WorldlineBoxSetup.exe` 更新桌面端。
 
@@ -60,7 +64,7 @@ WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/who
 
 聊天和桌宠通话的输入框上方都可新建或切换话题，并由电脑端 DSH 压缩当前伙伴在该话题的上下文。群聊可以选择要压缩的伙伴。
 
-「桌宠通话」使用桌面伙伴会面会话。拨号时沿用电脑端铃声，大肥鱼有专属铃声，其他伙伴使用通用铃声。未配置 Live2D 的伙伴显示原尺寸头像。私人测试 APK 可从相邻桌面仓库打包本地大肥鱼模型。模型原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko，公开发行需依据作者授权。贴图保留原尺寸，超出设备限制时生成适配版本。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。
+「桌宠通话」使用桌面伙伴会面会话。大肥鱼有专属铃声，其他伙伴使用通用铃声。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。私人测试 APK 可从相邻桌面仓库打包本地模型。原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。 [作者发布页面](https://www.bilibili.com/video/BV1ALnw6YEGK)
 
 ## 本地协议测试
 
@@ -68,4 +72,4 @@ WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/who
 
 ## 素材与第三方组件
 
-随源码提供的三张通话背景为项目生成素材。角色头像沿用桌面项目美术，来源和授权范围见[桌面项目第三方声明](https://github.com/whoiswennie/WorldlineBox/blob/main/THIRD_PARTY_NOTICES.md)。Live2D 查看器包含 SoulLink Emotion、PixiJS 和 pixi-live2d-display，原始许可证见 [`licenses`](licenses/)。本地模型、Cubism Core、铃声、测试 APK 和签名凭据由各自的构建输入提供。
+随源码提供的三张通话背景和公开版铃声为项目生成素材。角色头像沿用桌面项目美术，来源和授权范围见[桌面项目第三方声明](https://github.com/whoiswennie/WorldlineBox/blob/main/THIRD_PARTY_NOTICES.md)。Live2D 查看器包含 SoulLink Emotion、PixiJS 和 pixi-live2d-display，原始许可证见 [`licenses`](licenses/)。
