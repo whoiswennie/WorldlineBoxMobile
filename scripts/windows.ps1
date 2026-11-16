@@ -223,17 +223,43 @@ switch ($Action) {
             throw 'Release requires android\key.properties and a release keystore. Omit -Release for a sideloadable debug APK.'
         }
         $mode = if ($Release) { 'release' } else { 'debug' }
+        $privateRelease = $Release -and $IncludeLocalModel
         Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
         if ($IncludeLocalModel) {
-            if ($Release) { throw 'Local models are for private debug builds.' }
-            Invoke-Checked node @('scripts/stage-pet-models.mjs')
+            $stageArguments = @('scripts/stage-pet-models.mjs')
+            if ($privateRelease) { $stageArguments += '--private-release' }
+            Invoke-Checked node $stageArguments
         }
-        Invoke-Checked $flutter @('build', 'apk', "--$mode")
+        $previousPrivateModel = $env:WORLDLINEBOX_PRIVATE_ANDROID_MODEL
+        try {
+            $env:WORLDLINEBOX_PRIVATE_ANDROID_MODEL = if ($privateRelease) { '1' } else { '0' }
+            Invoke-Checked $flutter @('build', 'apk', "--$mode")
+        } finally {
+            $env:WORLDLINEBOX_PRIVATE_ANDROID_MODEL = $previousPrivateModel
+        }
+        $built = Join-Path $root "build\app\outputs\flutter-apk\app-$mode.apk"
+        if ($Release -or $IncludeLocalModel) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $archive = [IO.Compression.ZipFile]::OpenRead($built)
+            try {
+                $modelFiles = @($archive.Entries | Where-Object { $_.FullName.StartsWith('assets/pet-models/') })
+                if ($IncludeLocalModel) {
+                    if (-not $archive.GetEntry('assets/pet-models/models.json') -or
+                        -not $archive.GetEntry('assets/pet-models/live2dcubismcore.min.js') -or
+                        -not ($modelFiles.FullName -match '\.moc3$') -or -not ($modelFiles.FullName -match '\.png$')) {
+                        throw 'The private APK is missing required Live2D assets.'
+                    }
+                } elseif ($modelFiles.Count -gt 0) {
+                    throw 'The public APK contains private Live2D assets.'
+                }
+            } finally { $archive.Dispose() }
+        }
         $output = Join-Path $root 'dist'
         New-Item -ItemType Directory -Force -Path $output | Out-Null
-        $apk = Join-Path $output "WorldlineBoxMobile-$mode.apk"
-        Copy-Item -LiteralPath (Join-Path $root "build\app\outputs\flutter-apk\app-$mode.apk") -Destination $apk -Force
+        $filename = if ($privateRelease) { 'WorldlineBoxMobile-private-release.apk' } else { "WorldlineBoxMobile-$mode.apk" }
+        $apk = Join-Path $output $filename
+        Copy-Item -LiteralPath $built -Destination $apk -Force
         Write-Output $apk
     }
 }

@@ -9,12 +9,18 @@ plugins {
 val releaseProperties = Properties()
 val releaseConfig = rootProject.file("key.properties")
 if (releaseConfig.isFile) releaseConfig.inputStream().use(releaseProperties::load)
+val includePrivateModel = providers.environmentVariable("WORLDLINEBOX_PRIVATE_ANDROID_MODEL").orNull == "1"
+val privateModelAssets = rootProject.file("../.tools/android-private-assets")
 
 android {
     namespace = "io.worldlinebox.worldlinebox_mobile"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
     androidResources.noCompress += listOf("ogg", "wav")
+    if (includePrivateModel) {
+        require(privateModelAssets.resolve("pet-models/models.json").isFile) { "The private Live2D model has not been staged." }
+        sourceSets.getByName("release").assets.srcDir(privateModelAssets)
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

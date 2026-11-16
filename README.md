@@ -28,6 +28,8 @@ WorldlineBox Mobile `0.1.1` 是[世界线盒子桌面版](https://github.com/who
 
 从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。私人测试构建可从作者渠道取得模型，按[桌面端本地素材说明](https://github.com/whoiswennie/WorldlineBox/blob/main/public/companion-call/NOTICE.md)暂存到相邻仓库，再给开发或打包脚本传入 `-IncludeLocalModel`。
 
+有正式签名配置时，可运行 `03-Build-APK.bat -Release -IncludeLocalModel` 生成 `dist/WorldlineBoxMobile-private-release.apk`。它可用相同签名覆盖安装到自己的设备，须遵守模型作者对完整模型文件的分发限制。
+
 GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android 可能要求先卸载调试版再安装，此操作会清除本机配对及缓存，需重新扫码。
 
 ## 扫码连接

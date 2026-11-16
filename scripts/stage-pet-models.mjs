@@ -6,7 +6,8 @@ import { pathToFileURL } from 'node:url';
 const mobile = path.resolve(import.meta.dirname, '..');
 const desktop = path.resolve(mobile, '../WorldlineBox');
 const source = path.join(desktop, 'public', 'companion-call');
-const output = path.join(mobile, 'android/app/src/debug/assets/pet-models');
+const output = path.join(mobile, process.argv.includes('--private-release')
+  ? '.tools/android-private-assets/pet-models' : 'android/app/src/debug/assets/pet-models');
 const requireDesktop = createRequire(path.join(desktop, 'package.json'));
 const { rolldown } = await import(pathToFileURL(requireDesktop.resolve('rolldown')));
 const entry = path.join(desktop, 'src/main/companion-bot/call-models.ts');
@@ -81,7 +82,7 @@ try {
         motions: model.assets.motions.map(item => ({ ...item, file: modelPath(item.file) })) },
       vts: model.vtsParameters, credits: model.assets.credits, license: names.get(path.posix.join(modelDir, 'MODEL-LICENSE.txt')) },
   }));
-  console.log('Staged the desktop Live2D model for the private Android test APK.');
+  console.log('Staged the desktop Live2D model for the private Android APK.');
 } finally {
   await build.close();
 }
