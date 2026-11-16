@@ -5,7 +5,7 @@ WorldlineBox Mobile `0.1.1` 是[世界线盒子桌面版](https://github.com/who
 [下载 Android 0.1.1 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.1) · [下载 Windows 0.1.1 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.1) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
 - 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
-- 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。公开版以头像显示伙伴，配置了本地 Live2D 模型的私人构建可用播放中的音频驱动口型。
+- 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置 Arch-chan Live2D 模型，进入大肥鱼的桌宠会面即可使用，并可通过播放中的音频驱动口型。
 - 手机缓存近期会话及本机待发消息。连接恢复时重试待发消息，并从已确认的上传位置继续传文件。
 
 ## 语音
@@ -26,7 +26,7 @@ WorldlineBox Mobile `0.1.1` 是[世界线盒子桌面版](https://github.com/who
 
 三个脚本均支持 `-Proxy http://127.0.0.1:7897`。发布签名使用本地的 `android/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 环境交付 Android APK，iOS 构建需要 macOS 和相应签名环境。
 
-从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。私人测试构建可从作者渠道取得模型，按[桌面端本地素材说明](https://github.com/whoiswennie/WorldlineBox/blob/main/public/companion-call/NOTICE.md)暂存到相邻仓库，再给开发或打包脚本传入 `-IncludeLocalModel`。
+从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。标准构建直接使用仓库中的 Arch-chan 素材。私人测试构建可从作者渠道取得大肥鱼模型，通过桌面仓库的 `node scripts/stage-companion-call.mjs --model <作者原版 ZIP>` 暂存，再给开发或打包脚本传入 `-IncludeLocalModel`。
 
 有正式签名配置时，可运行 `03-Build-APK.bat -Release -IncludeLocalModel` 生成 `dist/WorldlineBoxMobile-private-release.apk`。它可用相同签名覆盖安装到自己的设备，须遵守模型作者对完整模型文件的分发限制。
 
@@ -75,3 +75,5 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 ## 素材与第三方组件
 
 随源码提供的三张通话背景和公开版铃声为项目生成素材。角色头像沿用桌面项目美术，来源和授权范围见[桌面项目第三方声明](https://github.com/whoiswennie/WorldlineBox/blob/main/THIRD_PARTY_NOTICES.md)。Live2D 查看器包含 SoulLink Emotion、PixiJS 和 pixi-live2d-display，原始许可证见 [`licenses`](licenses/)。
+
+内置 Arch-chan Live2D 模型由 RavioliMavioli 创作，采用 CC0 1.0。 [模型源文件](https://github.com/Speykious/arch-chan/tree/ed43dcf7e88d56f79d2e42fecb084bf6923f44e0/Live2D) · [CC0 授权文本](android/app/src/bundled/assets/pet-models/model/0.txt)

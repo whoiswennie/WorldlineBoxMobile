@@ -1441,8 +1441,9 @@ class _PetAssetServer {
     await modelFolder.create(recursive: true);
     final originals = <String, Future<File>>{};
     final variants = <String, File>{};
+    final cacheKey = model['cacheKey'] as String? ?? 'bundled-v1';
     Future<File> extract(String path) async {
-      final key = sha256.convert(utf8.encode('bundled-v1/$companion/$path'));
+      final key = sha256.convert(utf8.encode('$cacheKey/$companion/$path'));
       final file = File('${modelFolder.path}/$key');
       if (await file.exists()) return file;
       final temporary = File('${file.path}.${_uuid.v4()}.tmp');

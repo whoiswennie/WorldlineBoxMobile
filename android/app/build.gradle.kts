@@ -20,6 +20,8 @@ android {
     if (includePrivateModel) {
         require(privateModelAssets.resolve("pet-models/models.json").isFile) { "The private Live2D model has not been staged." }
         sourceSets.getByName("release").assets.srcDir(privateModelAssets)
+    } else {
+        sourceSets.getByName("main").assets.srcDir("src/bundled/assets")
     }
 
     compileOptions {

@@ -6,8 +6,10 @@ import { pathToFileURL } from 'node:url';
 const mobile = path.resolve(import.meta.dirname, '..');
 const desktop = path.resolve(mobile, '../WorldlineBox');
 const source = path.join(desktop, 'public', 'companion-call');
-const output = path.join(mobile, process.argv.includes('--private-release')
-  ? '.tools/android-private-assets/pet-models' : 'android/app/src/debug/assets/pet-models');
+const bundled = process.argv.includes('--bundled');
+const output = path.join(mobile, bundled ? 'android/app/src/bundled/assets/pet-models'
+  : process.argv.includes('--private-release') ? '.tools/android-private-assets/pet-models'
+    : 'android/app/src/debug/assets/pet-models');
 const requireDesktop = createRequire(path.join(desktop, 'package.json'));
 const { rolldown } = await import(pathToFileURL(requireDesktop.resolve('rolldown')));
 const entry = path.join(desktop, 'src/main/companion-bot/call-models.ts');
@@ -24,8 +26,10 @@ try {
   );
   const companion = 'builtin-dafeiyu';
   const { readBotCallModel } = module.exports;
-  const model = await readBotCallModel(source, companion);
+  const model = await readBotCallModel(source, companion, !bundled);
   if (!model) throw new Error('Could not read the desktop Live2D model.');
+  const expectedFolder = bundled ? 'arch-chan/' : 'deepseek/';
+  if (!model.model.startsWith(expectedFolder)) throw new Error(`Missing Live2D model in ${expectedFolder}.`);
   const modelDir = path.posix.dirname(model.model);
   const references = JSON.parse(await readFile(path.join(source, model.model), 'utf8')).FileReferences;
   const files = new Set([
@@ -77,12 +81,13 @@ try {
     await copyFile(original, target);
   }
   await writeFile(path.join(output, 'models.json'), JSON.stringify({
-    [companion]: { model: localModel, manifest: { Expressions: expressions, Motions: motions },
+    [companion]: { model: localModel, ...(bundled ? { cacheKey: 'arch-chan-ed43dcf' } : {}),
+      manifest: { Expressions: expressions, Motions: motions },
       catalog: { ...model.assets, expressions: model.assets.expressions.map(item => ({ ...item, file: modelPath(item.file) })),
         motions: model.assets.motions.map(item => ({ ...item, file: modelPath(item.file) })) },
       vts: model.vtsParameters, credits: model.assets.credits, license: names.get(path.posix.join(modelDir, 'MODEL-LICENSE.txt')) },
   }));
-  console.log('Staged the desktop Live2D model for the private Android APK.');
+  console.log(bundled ? 'Staged Arch-chan for Android builds.' : 'Staged the local Live2D model for Android.');
 } finally {
   await build.close();
 }

@@ -10,7 +10,7 @@
 - 对话气泡限制高度，长回复自动分页。首次出现回复时，执行进度、停止按钮和分页控件可以在气泡内完整显示。支持回看、重播、收起对白和查看完整对话。
 - 与 [Windows 0.1.1](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.1) 配对后，桌宠按当前页请求 DeepSeek 语音。该页播完再自动推进。连接旧版电脑时使用旧版语音接口。
 - 改进 Android 音频缓冲、播放结束等待和停止后的清理，降低网络间隙、短语音和快速切页时的播放问题。
-- 本地 Live2D 调试资源支持更自然的待机与口型过渡。公开 APK 支持头像会面与内置通话背景，保留 Live2D 查看器及其第三方许可证。原版角色模型与私人铃声单独在本地准备。
+- Android 和 Windows 安装包都内置 CC0 授权的 Arch-chan Live2D 模型。进入大肥鱼的桌宠会面即可使用，无需手动下载或导入模型。APK 同时包含内置通话背景。 [Arch-chan 模型与授权](https://github.com/Speykious/arch-chan)
 
 ### 开发与升级
 

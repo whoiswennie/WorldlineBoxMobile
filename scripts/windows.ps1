@@ -244,14 +244,18 @@ switch ($Action) {
             $archive = [IO.Compression.ZipFile]::OpenRead($built)
             try {
                 $modelFiles = @($archive.Entries | Where-Object { $_.FullName.StartsWith('assets/pet-models/') })
-                if ($IncludeLocalModel) {
-                    if (-not $archive.GetEntry('assets/pet-models/models.json') -or
-                        -not $archive.GetEntry('assets/pet-models/live2dcubismcore.min.js') -or
-                        -not ($modelFiles.FullName -match '\.moc3$') -or -not ($modelFiles.FullName -match '\.png$')) {
-                        throw 'The private APK is missing required Live2D assets.'
+                $registry = $archive.GetEntry('assets/pet-models/models.json')
+                if (!$registry -or !$archive.GetEntry('assets/pet-models/live2dcubismcore.min.js') -or
+                    -not ($modelFiles.FullName -match '\.moc3$') -or -not ($modelFiles.FullName -match '\.png$')) {
+                    throw 'The APK is missing required Live2D assets.'
+                }
+                if (!$IncludeLocalModel) {
+                    $reader = New-Object IO.StreamReader($registry.Open())
+                    try { $catalog = $reader.ReadToEnd() | ConvertFrom-Json }
+                    finally { $reader.Dispose() }
+                    if ($catalog.'builtin-dafeiyu'.cacheKey -notlike 'arch-chan-*') {
+                        throw 'The public APK does not contain the bundled Arch-chan model.'
                     }
-                } elseif ($modelFiles.Count -gt 0) {
-                    throw 'The public APK contains private Live2D assets.'
                 }
             } finally { $archive.Dispose() }
         }
