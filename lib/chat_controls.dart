@@ -205,7 +205,7 @@ class _TopicBar extends StatefulWidget {
     required this.onChanged,
     required this.onNotice,
     required this.onRouting,
-    this.dark = false,
+    this.inCall = false,
   });
 
   final String room;
@@ -215,7 +215,7 @@ class _TopicBar extends StatefulWidget {
   final Future<void> Function(Json) onChanged;
   final ValueChanged<String> onNotice;
   final ValueChanged<bool> onRouting;
-  final bool dark;
+  final bool inCall;
 
   @override
   State<_TopicBar> createState() => _TopicBarState();
@@ -342,19 +342,28 @@ class _TopicBarState extends State<_TopicBar> {
         topicId != null &&
         (phase == null || phase == 'idle') &&
         objects(widget.runtime['running']).isEmpty;
-    final foreground = widget.dark ? Colors.white : _accent;
+    final foreground = widget.inCall ? _callDockInk : _accent;
     final style = TextButton.styleFrom(
       foregroundColor: foreground,
-      disabledForegroundColor: widget.dark ? Colors.white54 : null,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      disabledForegroundColor: widget.inCall ? const Color(0xff73879b) : null,
+      textStyle: widget.inCall
+          ? const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)
+          : null,
+      padding: EdgeInsets.symmetric(horizontal: widget.inCall ? 6 : 8),
       minimumSize: const Size(36, 42),
+      tapTargetSize: widget.inCall ? MaterialTapTargetSize.shrinkWrap : null,
     );
     return Container(
-      margin: const EdgeInsets.fromLTRB(10, 3, 10, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 3),
+      margin: widget.inCall
+          ? EdgeInsets.zero
+          : const EdgeInsets.fromLTRB(10, 3, 10, 0),
+      padding: EdgeInsets.symmetric(horizontal: widget.inCall ? 5 : 3),
       decoration: BoxDecoration(
-        color: widget.dark ? const Color(0xe6252540) : const Color(0xfff0ebf8),
+        color: widget.inCall
+            ? const Color(0xfaf1f7fc)
+            : const Color(0xfff0ebf8),
         borderRadius: BorderRadius.circular(12),
+        border: widget.inCall ? Border.all(color: _callDockBorder) : null,
       ),
       child: Row(
         children: [

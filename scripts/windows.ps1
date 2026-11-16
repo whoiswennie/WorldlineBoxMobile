@@ -19,10 +19,90 @@ $flutterRoot = Join-Path $tools 'flutter'
 $androidRoot = Join-Path $tools 'android'
 $flutter = Join-Path $flutterRoot 'bin\flutter.bat'
 $sdkManager = Join-Path $androidRoot 'cmdline-tools\latest\bin\sdkmanager.bat'
+$emulator = Join-Path $androidRoot 'emulator\emulator.exe'
+$testAvd = 'WorldlineBoxTest'
 
 function Invoke-Checked([string] $Executable, [string[]] $Arguments) {
     & $Executable @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Executable failed with exit code $LASTEXITCODE." }
+}
+
+function Get-AndroidDeviceRows([string] $Adb) {
+    Invoke-Checked $Adb @('devices') | Where-Object { $_ -match '^\S+\t' }
+}
+
+function Test-AndroidDeviceReady([string] $Adb, [string] $Serial) {
+    # An online ADB transport can still close shell commands during boot or reconnect.
+    $ErrorActionPreference = 'Continue'
+    $properties = & $Adb -s $Serial shell getprop 2>$null
+    return ($LASTEXITCODE -eq 0 -and
+        $properties -match '^\[sys\.boot_completed\]: \[1\]\s*$' -and
+        $properties -match '^\[ro\.build\.version\.sdk\]: \[\d+\]\s*$' -and
+        $properties -match '^\[ro\.product\.cpu\.abi\]: \[\S+\]\s*$')
+}
+
+function Wait-AndroidDevice([string] $Adb, [string] $Serial) {
+    if (Test-AndroidDeviceReady $Adb $Serial) { return }
+
+    Write-Host "Waiting for Android device $Serial to finish booting and respond to ADB..."
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    while ($timer.Elapsed.TotalMinutes -lt 3) {
+        Start-Sleep -Seconds 2
+        if (Test-AndroidDeviceReady $Adb $Serial) { return }
+    }
+    throw "ADB could not read Android properties from $Serial. Check that the emulator is running or that the phone is unlocked and has authorized USB debugging, then rerun 02-Start-Development.bat."
+}
+
+function Start-TestEmulator([string] $Adb) {
+    $avdHome = Join-Path $tools 'avd'
+    if (!(Test-Path -LiteralPath $emulator -PathType Leaf) -or
+        !(Test-Path -LiteralPath (Join-Path $avdHome "$testAvd.ini") -PathType Leaf)) {
+        throw 'No Android device detected. Connect a phone with USB debugging enabled and accept its authorization prompt, or start an Android emulator and rerun 02-Start-Development.bat.'
+    }
+
+    $env:ANDROID_AVD_HOME = $avdHome
+    $stdout = Join-Path $tools 'dev-emulator-out.log'
+    $stderr = Join-Path $tools 'dev-emulator-error.log'
+    Write-Host "Opening the $testAvd emulator window and waiting for Android to boot..."
+    $process = Start-Process -FilePath $emulator -ArgumentList @('-avd', $testAvd) -WindowStyle Normal -PassThru `
+        -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    while ($timer.Elapsed.TotalMinutes -lt 3) {
+        if ($process.HasExited) {
+            throw "The $testAvd emulator exited with code $($process.ExitCode). See '$stderr' and '$stdout'."
+        }
+
+        foreach ($row in (Get-AndroidDeviceRows $Adb)) {
+            if ($row -notmatch '^(emulator-\d+)\s+device\s*$') { continue }
+            $serial = $Matches[1]
+            $name = & $Adb -s $serial emu avd name
+            if ($LASTEXITCODE -ne 0 -or $name -notcontains $testAvd) { continue }
+            if (Test-AndroidDeviceReady $Adb $serial) { return $serial }
+        }
+        Start-Sleep -Seconds 2
+    }
+    throw "Timed out waiting for $testAvd to boot. See '$stderr' and '$stdout'."
+}
+
+function Show-TestEmulator([string] $Adb, [string] $Serial) {
+    if ($Serial -notmatch '^emulator-\d+$') { return $Serial }
+    $name = & $Adb -s $Serial emu avd name
+    if ($LASTEXITCODE -ne 0 -or $name -notcontains $testAvd) { return $Serial }
+
+    $avdArgument = '\s(?:-avd\s+"?{0}"?|@{0})(?:\s|$)' -f [regex]::Escape($testAvd)
+    $launcher = Get-CimInstance Win32_Process -Filter "Name = 'emulator.exe'" | Where-Object {
+        $_.ExecutablePath -eq $emulator -and $_.CommandLine -match $avdArgument -and
+            $_.CommandLine -match '\s-no-window(?:\s|$)'
+    } | Select-Object -First 1
+    if (!$launcher) { return $Serial }
+
+    $workerIds = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($launcher.ProcessId)" |
+        Where-Object { $_.Name -like 'qemu-system-*-headless.exe' } | Select-Object -ExpandProperty ProcessId)
+    $processes = Get-Process -Id (@($launcher.ProcessId) + @($workerIds)) -ErrorAction SilentlyContinue
+    Write-Host "$testAvd is running without a window. Restarting it with a visible window..."
+    Invoke-Checked $Adb @('-s', $Serial, 'emu', 'kill') | Out-Null
+    if ($processes) { Wait-Process -InputObject $processes -Timeout 30 }
+    return (Start-TestEmulator $Adb)
 }
 
 function Receive-Archive([string] $Url, [string] $Destination) {
@@ -37,6 +117,19 @@ function Copy-CallRingtones {
     New-Item -ItemType Directory -Force -Path $target | Out-Null
     Copy-Item -LiteralPath (Join-Path $source 'ringtone.wav') -Destination (Join-Path $target 'common.wav') -Force
     Copy-Item -LiteralPath (Join-Path $source 'ringtones\dafeiyu.ogg') -Destination (Join-Path $target 'dafeiyu.ogg') -Force
+
+    $originals = Join-Path (Split-Path -Parent $root) 'WorldlineBox\.tools\original-call-ringtones'
+    $debugTarget = Join-Path $root 'android\app\src\debug\assets\pet-private-ringtones'
+    foreach ($track in @(@{ Source = 'dafeiyu.wav'; Name = 'dafeiyu.wav' }, @{ Source = 'ringtone.wav'; Name = 'phoebe.wav' })) {
+        $original = Join-Path $originals $track.Source
+        $destination = Join-Path $debugTarget $track.Name
+        if (Test-Path -LiteralPath $original -PathType Leaf) {
+            New-Item -ItemType Directory -Force -Path $debugTarget | Out-Null
+            Copy-Item -LiteralPath $original -Destination $destination -Force
+        } elseif (Test-Path -LiteralPath $destination -PathType Leaf) {
+            Remove-Item -LiteralPath $destination
+        }
+    }
 }
 
 if ($Proxy) {
@@ -98,15 +191,30 @@ switch ($Action) {
         Invoke-Checked $flutter @('doctor', '-v')
     }
     'Dev' {
+        $adb = Join-Path $androidRoot 'platform-tools\adb.exe'
+        $autoDevice = !$Device
+        if ($autoDevice) {
+            $rows = @(Get-AndroidDeviceRows $adb)
+            $targets = @($rows | Where-Object { $_ -match '^\S+\s+device\s*$' } | ForEach-Object { ($_ -split '\s+')[0] })
+            if ($targets.Count -gt 1) {
+                throw "Multiple Android devices are ready. Pass -Device <id>. Available IDs: $($targets -join ', ')."
+            }
+            if ($targets.Count -eq 1) {
+                $Device = $targets[0]
+            } elseif ($rows.Count -eq 1 -and $rows[0] -match '^(emulator-\d+)\s+offline\s*$') {
+                $Device = $Matches[1]
+            } elseif ($rows.Count -gt 0) {
+                throw "Android devices detected but not ready: $($rows -join '; '). Accept the USB debugging prompt on your phone or wait for the emulator to finish booting, then rerun the script."
+            } else {
+                $Device = Start-TestEmulator $adb
+            }
+        }
         Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
         if ($IncludeLocalModel) { Invoke-Checked node @('scripts/stage-pet-models.mjs') }
-        if (!$Device) {
-            $adb = Join-Path $androidRoot 'platform-tools\adb.exe'
-            $targets = @(& $adb devices | Where-Object { $_ -match '^([^\s]+)\s+device$' } | ForEach-Object { ($_ -split '\s+')[0] })
-            if ($targets.Count -ne 1) { throw 'Connect one authorized Android device or emulator, or pass -Device <id>.' }
-            $Device = $targets[0]
-        }
+        Wait-AndroidDevice $adb $Device
+        if ($autoDevice) { $Device = Show-TestEmulator $adb $Device }
+        Write-Host "Launching WorldlineBox on $Device. Flutter keeps this terminal open for logs and hot reload."
         $arguments = @('run', '-d', $Device)
         Invoke-Checked $flutter $arguments
     }

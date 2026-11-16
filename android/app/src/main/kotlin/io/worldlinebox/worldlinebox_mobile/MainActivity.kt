@@ -45,11 +45,20 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "play" -> {
                     stopRingtone()
-                    val asset = if (call.arguments == "dafeiyu") "dafeiyu.ogg" else "common.wav"
+                    val track = call.arguments
+                    val fallback = if (track == "dafeiyu") "dafeiyu.ogg" else "common.wav"
                     try {
                         val player = MediaPlayer()
                         ringtone = player
-                        assets.openFd("pet-ringtones/$asset").use { descriptor ->
+                        val original = when (track) {
+                            "dafeiyu" -> "pet-private-ringtones/dafeiyu.wav"
+                            "phoebe" -> "pet-private-ringtones/phoebe.wav"
+                            else -> null
+                        }
+                        val source = original?.let { file ->
+                            try { assets.openFd(file) } catch (_: java.io.FileNotFoundException) { null }
+                        } ?: assets.openFd("pet-ringtones/$fallback")
+                        source.use { descriptor ->
                             player.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
                         }
                         player.setAudioAttributes(AudioAttributes.Builder()
@@ -177,6 +186,12 @@ class MainActivity : FlutterActivity() {
                             @JavascriptInterface fun postMessage(status: String) {
                                 runOnUiThread { channel.invokeMethod("status", status) }
                             }
+                            @JavascriptInterface fun reportFigure(x: Double, y: Double, width: Double, height: Double) {
+                                val bounds = listOf(x, y, width, height)
+                                if (bounds.all { it.isFinite() } && width > 0 && height > 0) {
+                                    runOnUiThread { channel.invokeMethod("figure", bounds) }
+                                }
+                            }
                         }, "PetStatus")
                     }
                     stages[id] = web
@@ -184,6 +199,17 @@ class MainActivity : FlutterActivity() {
                         if (call.method == "cue" && call.arguments is String) {
                             val json = org.json.JSONObject.quote(call.arguments as String)
                             web.evaluateJavascript("window.petCue?.(JSON.parse($json));", null)
+                            result.success(null)
+                        } else if (call.method == "presence" && call.arguments in listOf("idle", "waiting", "speaking")) {
+                            val value = org.json.JSONObject.quote(call.arguments as String)
+                            web.evaluateJavascript("window.petPresence?.($value);", null)
+                            result.success(null)
+                        } else if (call.method == "fullBody" && call.arguments is Boolean) {
+                            web.evaluateJavascript("window.petFullBody?.(${call.arguments});", null)
+                            result.success(null)
+                        } else if (call.method == "bodyShape" && call.arguments is Number) {
+                            val value = (call.arguments as Number).toDouble()
+                            if (value.isFinite()) web.evaluateJavascript("window.petBodyShape?.($value);", null)
                             result.success(null)
                         } else result.notImplemented()
                     }

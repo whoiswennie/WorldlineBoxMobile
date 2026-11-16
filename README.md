@@ -1,8 +1,8 @@
 # 世界线盒子 · 手机端
 
-WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
+WorldlineBox Mobile `0.1.1` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
-[下载 Android 0.1.0 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.0) · [下载 Windows 0.1.0 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.0) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+[下载 Android 0.1.1 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.1) · [下载 Windows 0.1.1 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.1) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
 - 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
 - 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。公开版以头像显示伙伴，配置了本地 Live2D 模型的私人构建可用播放中的音频驱动口型。
@@ -12,7 +12,7 @@ WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/who
 
 在桌面「设置 → 全局模型」中保存官方 `https://api.deepseek.com` 配置和 API Key。当前聊天可以继续使用已配置的模型。语音服务使用桌面保存的 DeepSeek 官方凭据，手机通过已配对的 SSH 连接发起请求。
 
-点击伙伴消息下方的扬声器即可朗读整条消息。桌宠通话按对话段使用 WebSocket 流式合成。两种模式都使用 Stella。手机在聊天中点麦克风开始录音，再点一次将录音转成可编辑文字。首次使用时 Android 会请求麦克风权限。[DeepSeek 语音合成](https://api-docs.deepseek.com/zh-cn/guides/tts) · [DeepSeek 语音识别](https://api-docs.deepseek.com/zh-cn/guides/asr)
+点击伙伴消息下方的扬声器即可朗读整条消息。桌宠通话按对话段使用 WebSocket 流式合成。两种模式都使用 Stella。支持压缩的桌面端会用 gzip 无损转发音频。Android 缓冲约一秒音频后开始播放，较短的片段在接收完毕后立即播放。手机在聊天中点麦克风开始录音，再点一次将录音转成可编辑文字。首次使用时 Android 会请求麦克风权限。[DeepSeek 语音合成](https://api-docs.deepseek.com/zh-cn/guides/tts) · [DeepSeek 语音识别](https://api-docs.deepseek.com/zh-cn/guides/asr)
 
 ## 开发与打包
 
@@ -21,7 +21,7 @@ WorldlineBox Mobile `0.1.0` 是[世界线盒子桌面版](https://github.com/who
 | 脚本 | 用法 |
 | --- | --- |
 | `01-Setup-Environment.bat` | 下载项目固定版本 Flutter、JDK 和 Android SDK，交互确认 Android SDK 许可，再解析依赖。传 `-Update` 刷新项目固定的工具链。 |
-| `02-Start-Development.bat` | 用 USB 调试设备或已启动的 Android 模拟器运行 Flutter 调试版。多个设备时传 `-Device <id>`。 |
+| `02-Start-Development.bat` | 用已授权的 USB 调试设备或运行中的 Android 模拟器启动 Flutter 调试版。没有设备时自动打开本项目已配置的 `WorldlineBoxTest` 模拟器。自动选中的 `WorldlineBoxTest` 若以无窗口模式运行，脚本会重启它并打开窗口。使用 `-Device <id>` 可指定设备或继续使用无窗口模拟器。启动后终端会保持打开，用于日志和热重载。 |
 | `03-Build-APK.bat` | 打包可侧载的调试 APK，输出到 `dist/WorldlineBoxMobile-debug.apk`。有自己的签名配置时传 `-Release`。 |
 
 三个脚本均支持 `-Proxy http://127.0.0.1:7897`。发布签名使用本地的 `android/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 环境交付 Android APK，iOS 构建需要 macOS 和相应签名环境。
@@ -64,7 +64,7 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 
 聊天和桌宠通话的输入框上方都可新建或切换话题，并由电脑端 DSH 压缩当前伙伴在该话题的上下文。群聊可以选择要压缩的伙伴。
 
-「桌宠通话」使用桌面伙伴会面会话。大肥鱼有专属铃声，其他伙伴使用通用铃声。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。私人测试 APK 可从相邻桌面仓库打包本地模型。原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。 [作者发布页面](https://www.bilibili.com/video/BV1ALnw6YEGK)
+「桌宠通话」使用桌面伙伴会面会话。大肥鱼有专属铃声，其他伙伴默认使用菲比的铃声。未随包提供菲比原曲时，使用内置提示音。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。私人测试 APK 可从相邻桌面仓库打包本地模型。原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。 [作者发布页面](https://www.bilibili.com/video/BV1ALnw6YEGK)
 
 ## 本地协议测试
 

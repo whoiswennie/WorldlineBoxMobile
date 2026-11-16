@@ -32,6 +32,7 @@ class MobileApi {
   final Set<Socket> _sockets = {};
   bool _closed = false;
   int maxUploadBytes = 0;
+  bool pagedSpeech = false;
 
   static Future<MobileApi> connect(
     HostProfile profile, {
@@ -111,6 +112,7 @@ class MobileApi {
       final health = await api._json('GET', 'health');
       if (health['protocol'] != 1) throw const MobileException('电脑端移动协议版本不兼容。');
       api.maxUploadBytes = health['maxUploadBytes'] as int;
+      api.pagedSpeech = health['pagedSpeech'] == true;
       return api;
     } catch (_) {
       if (api != null) {
@@ -282,13 +284,16 @@ class MobileApi {
     String room,
     String message, {
     String? part,
+    int? pageIndex,
     Future<void>? cancel,
   }) async* {
     final request = await _open('GET', 'speech', {
       'conversationId': room,
       'messageId': message,
       'partId': ?part,
+      'pageIndex': ?pageIndex?.toString(),
     });
+    request.headers.set(HttpHeaders.acceptEncodingHeader, 'gzip');
     if (cancel != null) unawaited(cancel.then((_) => request.abort()));
     try {
       final response = await request.close().timeout(

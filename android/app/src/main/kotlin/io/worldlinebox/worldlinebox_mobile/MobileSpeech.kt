@@ -6,6 +6,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.MethodChannel
@@ -31,12 +32,16 @@ internal class MobileSpeech(private val activity: Activity, private val mouth: (
 
     fun start(id: Int, stage: Int?) {
         stop()
-        val buffer = AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val sampleRate = 24000
+        val buffer = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         check(buffer > 0)
+        val streamingBuffer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) sampleRate * 2 else 5760
         val track = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-            .setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(maxOf(buffer, 5760)).setTransferMode(AudioTrack.MODE_STREAM).build()
+            .setAudioFormat(AudioFormat.Builder().setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
+            .setBufferSizeInBytes(maxOf(buffer, streamingBuffer)).setTransferMode(AudioTrack.MODE_STREAM).build()
+        // Dart has already buffered startup audio. Short replies can use a fraction of the track buffer.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) track.setStartThresholdInFrames(1)
         val session = Playback(id, stage, track)
         playing = session
         track.play()

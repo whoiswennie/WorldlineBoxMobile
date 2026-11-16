@@ -77,6 +77,8 @@ try {
   }
   await writeFile(path.join(output, 'models.json'), JSON.stringify({
     [companion]: { model: localModel, manifest: { Expressions: expressions, Motions: motions },
+      catalog: { ...model.assets, expressions: model.assets.expressions.map(item => ({ ...item, file: modelPath(item.file) })),
+        motions: model.assets.motions.map(item => ({ ...item, file: modelPath(item.file) })) },
       vts: model.vtsParameters, credits: model.assets.credits, license: names.get(path.posix.join(modelDir, 'MODEL-LICENSE.txt')) },
   }));
   console.log('Staged the desktop Live2D model for the private Android test APK.');

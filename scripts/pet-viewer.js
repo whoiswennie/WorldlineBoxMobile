@@ -1,12 +1,39 @@
 import { Live2DRenderer, createScriptTagCubismLoader } from '@soullink-emotion/live2d-pixi';
-import { SoullinkRuntime } from '@soullink-emotion/engine';
-import { BotCallPerformance } from '../src/renderer/companion-bot/call-performance.ts';
-import { BOT_CALL_PORTRAIT_SCALE, botCallProfile } from '../src/renderer/companion-bot/call-presentation.ts';
+import { createCallAvatar } from '../src/renderer/companion-bot/call-avatar.ts';
+import { BOT_CALL_PORTRAIT_SCALE } from '../src/renderer/companion-bot/call-presentation.ts';
 import '@pixi/unsafe-eval';
 
 const stage = document.getElementById('stage');
-let renderer, performanceState, lastCue, sequence = 0, neutral;
-window.startPet = async ({ model, manifest, core, vts, name }) => {
+let renderer, avatar, lastCue, presence = 'idle', fullBody = false, frame = 0, resize, fit;
+
+// Older locally staged model folders only carry the manifest.
+async function readCatalog(model, manifest) {
+  const read = async file => {
+    const response = await fetch(new URL(file, new URL(model, document.baseURI)));
+    if (!response.ok) throw new Error('Could not read Live2D animation');
+    return response.json();
+  };
+  const expressions = await Promise.all((manifest?.Expressions ?? []).map(async ({ Name: name, File: file }) => ({
+    name, file, params: (await read(file)).Parameters.map(item => item.Id),
+  })));
+  const motions = await Promise.all(Object.entries(manifest?.Motions ?? {}).flatMap(([group, clips]) => clips.map(async ({ File: file }, index) => {
+    const motion = await read(file);
+    return { group, index, file, name: file, duration: motion.Meta.Duration,
+      params: motion.Curves.filter(item => item.Target === 'Parameter').map(item => item.Id) };
+  })));
+  return { expressions, motions, credits: '', license: '' };
+}
+
+function dispose() {
+  cancelAnimationFrame(frame);
+  resize?.disconnect();
+  avatar?.dispose();
+  renderer?.destroy();
+  avatar = undefined;
+  renderer = undefined;
+}
+
+window.startPet = async ({ model, manifest, core, vts, name, catalog }) => {
   try {
     const loadCore = createScriptTagCubismLoader(core);
     renderer = new Live2DRenderer(stage, { cubismLoader: async () => {
@@ -26,66 +53,60 @@ window.startPet = async ({ model, manifest, core, vts, name }) => {
     renderer.syncViewport(2);
     const prepared = await fetch(`prepare?limit=${limit}`);
     if (!prepared.ok) throw new Error('Could not prepare model textures');
-    const parameters = await renderer.load(model, { automaticIdle: true, animations: manifest });
-    const clock = () => performance.now() / 1000;
-    const profile = botCallProfile(parameters, model, name, vts);
-    performanceState = new BotCallPerformance(new SoullinkRuntime({ profile }), clock);
-    const fit = () => {
+    const parameters = await renderer.load(model, { automaticIdle: false, animations: manifest });
+    catalog ??= await readCatalog(model, manifest);
+    await renderer.prepareNativeAnimations(catalog.expressions.map(item => item.name), catalog.motions);
+    avatar = createCallAvatar({ host: stage, renderer, parameters, catalog, modelUrl: model, name, vts });
+    fit = () => {
       renderer.syncViewport(2);
-      renderer.setViewScale(BOT_CALL_PORTRAIT_SCALE);
-      renderer.setViewOffset({ x: 0, y: stage.clientHeight * Math.max(0, BOT_CALL_PORTRAIT_SCALE - 1) * .48 });
+      renderer.setFullBody(fullBody);
+      renderer.setViewScale(fullBody ? 1 : BOT_CALL_PORTRAIT_SCALE);
+      renderer.setViewOffset({ x: 0, y: fullBody ? 0 : stage.clientHeight * Math.max(0, BOT_CALL_PORTRAIT_SCALE - 1) * .48 });
+      const bounds = avatar.captionHead();
+      const width = stage.clientWidth, height = stage.clientHeight;
+      if (bounds && width && height) window.PetStatus?.reportFigure?.(
+        bounds.x / width, bounds.y / height, bounds.width / width, bounds.height / height,
+      );
     };
     fit();
-    let previous = clock();
     const tick = () => {
-      if (!renderer) return;
-      const now = clock();
-      renderer.setParameters(performanceState.update(now, now - previous).live2dParams);
-      previous = now;
-      requestAnimationFrame(tick);
+      avatar.update();
+      frame = requestAnimationFrame(tick);
     };
+    avatar.controls.present(lastCue ?? undefined, lastCue?.text);
+    avatar.controls.presence(presence);
     tick();
-    if (lastCue) window.petCue(lastCue);
     // Texture upload happens when Pixi draws, after load() has returned.
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const error = gl.getError();
     if (error !== gl.NO_ERROR || gl.isContextLost()) throw new Error(`Live2D texture rendering failed (${error})`);
-    new ResizeObserver(fit).observe(stage);
-    stage.addEventListener('pointermove', ({ clientX, clientY }) => performanceState.point(clientX / stage.clientWidth * 2 - 1, clientY / stage.clientHeight * 2 - 1));
-    stage.addEventListener('pointerleave', () => performanceState.leave());
+    resize = new ResizeObserver(fit);
+    resize.observe(stage);
     console.info(`Pet model rendered at ${canvas.width}x${canvas.height} (WebGL texture limit ${limit})`);
     canvas.addEventListener('webglcontextlost', () => {
-      canvas.style.visibility = 'hidden';
+      dispose();
       window.PetStatus?.postMessage('error');
     }, { once: true });
     window.PetStatus?.postMessage('ready');
+    if (avatar.controls.hasBodyShape) window.PetStatus?.postMessage('body-shape');
   } catch (error) {
-    const failed = renderer;
-    renderer = undefined;
-    performanceState = undefined;
+    dispose();
     console.warn('Pet model:', error?.message ?? String(error));
     window.PetStatus?.postMessage('error');
-    failed?.destroy();
   }
 };
 
 window.petCue = cue => {
   lastCue = cue;
-  const match = /^(.*):(\d+)$/.exec(cue.motion ?? '');
-  clearTimeout(neutral);
-  renderer?.stopNativeMotion();
-  renderer?.applyNativeAnimation(null);
-  performanceState?.setGesture(cue.gesture);
-  performanceState?.setPresence('speaking');
-  renderer?.applyNativeAnimation({
-    token: ++sequence,
-    expression: cue.expression ?? null,
-    motion: match ? { group: match[1], index: Number(match[2]), priority: 'force' } : null,
-    suppressParamIds: [],
-  });
-  neutral = setTimeout(() => {
-    renderer?.applyNativeAnimation(null);
-    performanceState?.setPresence('idle');
-  }, Math.max(400, cue.durationMs ?? 3500));
+  avatar?.controls.present(cue ?? undefined, cue?.text);
 };
-window.petAudio = level => performanceState?.audio(level);
+window.petPresence = value => {
+  presence = value;
+  avatar?.controls.presence(value);
+};
+window.petAudio = level => avatar?.controls.audio(level);
+window.petBodyShape = value => avatar?.controls.bodyShape(value);
+window.petFullBody = value => {
+  fullBody = value;
+  if (renderer) fit?.();
+};

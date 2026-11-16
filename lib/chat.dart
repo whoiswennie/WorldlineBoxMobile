@@ -6,6 +6,9 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show Factory;
+import 'package:flutter/gestures.dart'
+    show EagerGestureRecognizer, OneSequenceGestureRecognizer;
 // Keep compatibility with the Flutter material widgets used by the app.
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
@@ -16,6 +19,7 @@ import 'package:uuid/uuid.dart';
 
 import 'mobile_api.dart';
 import 'mobile_speech.dart';
+import 'pet_call_bubble.dart';
 import 'chat_cache.dart';
 import 'pairing.dart';
 import 'profile.dart';

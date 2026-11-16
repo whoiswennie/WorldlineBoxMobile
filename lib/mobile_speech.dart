@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:typed_data' show BytesBuilder;
 import 'package:flutter/services.dart';
 import 'mobile_api.dart';
 
 class MobileSpeech {
   static const channel = MethodChannel('worldlinebox/pet-voice');
+  // A second of mono 24 kHz, 16-bit PCM, matching the Android AudioTrack.
+  static const _prebufferBytes = 48000;
+  static const _writeBytes = 8192;
   static int _next = 0;
   int? _session;
   StreamSubscription<List<int>>? _stream;
@@ -14,49 +18,59 @@ class MobileSpeech {
     String room,
     String message, {
     String? part,
+    int? pageIndex,
     int? stage,
   }) async {
     await stop();
     final session = _session = ++_next;
     final finished = _finished = Completer<void>();
-    try {
-      await channel.invokeMethod<void>('start', {
-        'id': session,
-        'stage': ?stage,
-      });
-    } catch (_) {
-      if (_session == session) await stop();
-      rethrow;
+    final pending = BytesBuilder(copy: false);
+    var started = false;
+
+    Future<void> writePending() async {
+      if (_session != session || pending.length < 2) return;
+      if (!started) {
+        await channel.invokeMethod<void>('start', {
+          'id': session,
+          'stage': ?stage,
+        });
+        started = true;
+      }
+      final bytes = pending.takeBytes();
+      final count = bytes.length & ~1;
+      if (count < bytes.length) pending.addByte(bytes.last);
+      for (
+        var offset = 0;
+        offset < count && _session == session;
+        offset += _writeBytes
+      ) {
+        final end = offset + _writeBytes < count ? offset + _writeBytes : count;
+        await channel.invokeMethod<void>('pcm', {
+          'id': session,
+          'bytes': Uint8List.sublistView(bytes, offset, end),
+        });
+      }
     }
-    if (_session != session) return;
-    var tail = <int>[];
+
     late StreamSubscription<List<int>> stream;
     stream = api
         .speech(
           room,
           message,
           part: part,
+          pageIndex: pageIndex,
           cancel: finished.future.then<void>((_) {}, onError: (Object _) {}),
         )
         .listen(
           (chunk) {
+            pending.add(chunk);
+            if (pending.length < (started ? _writeBytes : _prebufferBytes)) {
+              return;
+            }
             stream.pause();
             unawaited(() async {
               try {
-                final bytes = Uint8List.fromList([...tail, ...chunk]);
-                final count = bytes.length & ~1;
-                tail = bytes.sublist(count);
-                for (
-                  var offset = 0;
-                  offset < count && _session == session;
-                  offset += 8192
-                ) {
-                  final end = offset + 8192 < count ? offset + 8192 : count;
-                  await channel.invokeMethod<void>('pcm', {
-                    'id': session,
-                    'bytes': Uint8List.sublistView(bytes, offset, end),
-                  });
-                }
+                await writePending();
                 stream.resume();
               } catch (error, stack) {
                 if (!finished.isCompleted) finished.completeError(error, stack);
@@ -69,7 +83,11 @@ class MobileSpeech {
           onDone: () {
             unawaited(() async {
               try {
-                if (tail.isNotEmpty) throw const MobileException('音频数据不完整。');
+                if (pending.length.isOdd || (!started && pending.isEmpty)) {
+                  throw const MobileException('音频数据不完整。');
+                }
+                await writePending();
+                if (_session != session) return;
                 await channel
                     .invokeMethod<void>('drain', session)
                     .timeout(const Duration(seconds: 5));
