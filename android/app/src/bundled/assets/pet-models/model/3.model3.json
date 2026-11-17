@@ -1,1 +1,0 @@
-{"Version":3,"FileReferences":{"Moc":"2.moc3","Textures":["7.png"],"Physics":"4.physics3.json","DisplayInfo":"3.cdi3.json","Expressions":[{"Name":"Mouse","File":"6.exp3.json"}],"Motions":{}},"Groups":[{"Target":"Parameter","Name":"EyeBlink","Ids":["ParamEyeLOpen","ParamEyeROpen"]},{"Target":"Parameter","Name":"LipSync","Ids":["ParamMouthOpenY"]}],"HitAreas":[]}

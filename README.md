@@ -1,11 +1,11 @@
 # 世界线盒子 · 手机端
 
-WorldlineBox Mobile `0.1.1` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
+WorldlineBox Mobile `0.1.2` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
-[下载 Android 0.1.1 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.1) · [下载 Windows 0.1.1 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.1) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+[下载 Android 0.1.2 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.2) · [下载 Windows 0.1.2 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.2) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
 - 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
-- 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置 Arch-chan Live2D 模型，进入大肥鱼的桌宠会面即可使用，并可通过播放中的音频驱动口型。
+- 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置大肥鱼（DeepSeek-chan）和月见八千代的 Live2D。与桌面版配对后，进入对应伙伴的桌宠会面即可加载自己的模型，播放中的语音可以驱动口型。
 - 手机缓存近期会话及本机待发消息。连接恢复时重试待发消息，并从已确认的上传位置继续传文件。
 
 ## 语音
@@ -26,9 +26,7 @@ WorldlineBox Mobile `0.1.1` 是[世界线盒子桌面版](https://github.com/who
 
 三个脚本均支持 `-Proxy http://127.0.0.1:7897`。发布签名使用本地的 `android/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 环境交付 Android APK，iOS 构建需要 macOS 和相应签名环境。
 
-从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。标准构建直接使用仓库中的 Arch-chan 素材。私人测试构建可从作者渠道取得大肥鱼模型，通过桌面仓库的 `node scripts/stage-companion-call.mjs --model <作者原版 ZIP>` 暂存，再给开发或打包脚本传入 `-IncludeLocalModel`。
-
-有正式签名配置时，可运行 `03-Build-APK.bat -Release -IncludeLocalModel` 生成 `dist/WorldlineBoxMobile-private-release.apk`。它可用相同签名覆盖安装到自己的设备，须遵守模型作者对完整模型文件的分发限制。
+从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。构建直接使用此仓库内的两款授权模型，首次克隆后运行 Git LFS 拉取模型及贴图。桌面仓库的授权模型更新后，可运行 `node scripts/stage-pet-models.mjs` 同步 Android 资源。
 
 GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android 可能要求先卸载调试版再安装，此操作会清除本机配对及缓存，需重新扫码。
 
@@ -66,7 +64,7 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 
 聊天和桌宠通话的输入框上方都可新建或切换话题，并由电脑端 DSH 压缩当前伙伴在该话题的上下文。群聊可以选择要压缩的伙伴。
 
-「桌宠通话」使用桌面伙伴会面会话。大肥鱼有专属铃声，其他伙伴默认使用菲比的铃声。未随包提供菲比原曲时，使用内置提示音。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。私人测试 APK 可从相邻桌面仓库打包本地模型。原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。 [作者发布页面](https://www.bilibili.com/video/BV1ALnw6YEGK)
+「桌宠通话」使用桌面伙伴会面会话。大肥鱼有专属铃声，其他伙伴默认使用菲比的铃声。未随包提供菲比原曲时，使用内置提示音。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。
 
 ## 本地协议测试
 
@@ -76,4 +74,4 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 
 随源码提供的三张通话背景和公开版铃声为项目生成素材。角色头像沿用桌面项目美术，来源和授权范围见[桌面项目第三方声明](https://github.com/whoiswennie/WorldlineBox/blob/main/THIRD_PARTY_NOTICES.md)。Live2D 查看器包含 SoulLink Emotion、PixiJS 和 pixi-live2d-display，原始许可证见 [`licenses`](licenses/)。
 
-内置 Arch-chan Live2D 模型由 RavioliMavioli 创作，采用 CC0 1.0。 [模型源文件](https://github.com/Speykious/arch-chan/tree/ed43dcf7e88d56f79d2e42fecb084bf6923f44e0/Live2D) · [CC0 授权文本](android/app/src/bundled/assets/pet-models/model/0.txt)
+大肥鱼（DeepSeek-chan）的原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。月见八千代使用雪熊企划授权随世界线项目分发的模型。 [大肥鱼模型使用须知](android/app/src/bundled/assets/pet-models/dafeiyu/license.txt) · [八千代分发许可](android/app/src/bundled/assets/pet-models/yachiyo/license.txt)

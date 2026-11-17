@@ -6,8 +6,7 @@ param(
     [uri] $Proxy,
     [string] $Device,
     [switch] $Update,
-    [switch] $Release,
-    [switch] $IncludeLocalModel
+    [switch] $Release
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +24,79 @@ $testAvd = 'WorldlineBoxTest'
 function Invoke-Checked([string] $Executable, [string[]] $Arguments) {
     & $Executable @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Executable failed with exit code $LASTEXITCODE." }
+}
+
+function Assert-ApkFile($Archive, [string] $EntryName, [string] $SourcePath) {
+    $entry = $Archive.GetEntry($EntryName)
+    if (!$entry) { throw "APK entry missing: $EntryName" }
+    $hash = [Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = $entry.Open()
+        try { $actual = [BitConverter]::ToString($hash.ComputeHash($stream)) }
+        finally { $stream.Dispose() }
+        $stream = [IO.File]::OpenRead($SourcePath)
+        try { $expected = [BitConverter]::ToString($hash.ComputeHash($stream)) }
+        finally { $stream.Dispose() }
+    } finally { $hash.Dispose() }
+    if ($actual -ne $expected) { throw "APK entry differs from the staged source: $EntryName" }
+}
+
+function Assert-BundledPetModels([string] $Apk) {
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $source = Join-Path $root 'android/app/src/bundled/assets/pet-models'
+    $expectedModels = @{ 'builtin-dafeiyu' = 'dafeiyu'; 'yachiyo-runami' = 'yachiyo' }
+    $prefix = 'assets/pet-models/'
+    $archive = [IO.Compression.ZipFile]::OpenRead($Apk)
+    try {
+        Assert-ApkFile $archive ($prefix + 'live2dcubismcore.min.js') (Join-Path $source 'live2dcubismcore.min.js')
+        Assert-ApkFile $archive ($prefix + 'models.json') (Join-Path $source 'models.json')
+        Assert-ApkFile $archive 'assets/flutter_assets/assets/portraits/yachiyo-runami.png' (Join-Path $root 'assets/portraits/yachiyo-runami.png')
+        $registry = Get-Content -LiteralPath (Join-Path $source 'models.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $registeredModels = @($archive.Entries | Where-Object { $_.FullName.StartsWith($prefix) -and $_.Name -like '*.model3.json' })
+        if (@($registry.PSObject.Properties).Count -ne 2 -or $registeredModels.Count -ne 2) {
+            throw 'The APK must contain exactly two registered Live2D models.'
+        }
+        foreach ($id in $expectedModels.Keys) {
+            $directory = $expectedModels[$id]
+            $model = $registry.$id
+            if ($model.model -notmatch "^$directory/[0-9]+\.model3\.json$" -or
+                $model.license -ne "$directory/license.txt" -or $model.cacheKey -notmatch "^$directory-[0-9a-f]{64}$") {
+                throw "Wrong bundled Live2D model for $id."
+            }
+            $manifest = Get-Content -LiteralPath (Join-Path $source $model.model) -Raw -Encoding UTF8 | ConvertFrom-Json
+            $refs = $manifest.FileReferences
+            $moc = Join-Path (Join-Path $source $directory) $refs.Moc
+            $stream = [IO.File]::OpenRead($moc)
+            try {
+                $magic = New-Object byte[] 4
+                if ($stream.Read($magic, 0, 4) -ne 4 -or [Text.Encoding]::ASCII.GetString($magic) -cne 'MOC3') {
+                    throw "Invalid Live2D model binary for $id. Run git lfs pull."
+                }
+            } finally { $stream.Dispose() }
+            $textureCount = if ($id -eq 'builtin-dafeiyu') { 5 } else { 2 }
+            if (@($refs.Textures).Count -ne $textureCount) { throw "Missing Live2D textures for $id." }
+            foreach ($entry in Get-ChildItem -LiteralPath (Join-Path $source $directory) -File) {
+                if ($entry.Extension -eq '.png') {
+                    $stream = $entry.OpenRead()
+                    try {
+                        $magic = New-Object byte[] 8
+                        if ($stream.Read($magic, 0, 8) -ne 8 -or [BitConverter]::ToString($magic) -ne '89-50-4E-47-0D-0A-1A-0A') {
+                            throw "Invalid Live2D texture $($entry.Name). Run git lfs pull."
+                        }
+                    } finally { $stream.Dispose() }
+                }
+                Assert-ApkFile $archive "$prefix$directory/$($entry.Name)" $entry.FullName
+            }
+            foreach ($file in @($refs.Moc, $refs.Physics, $refs.DisplayInfo, $refs.Pose, $refs.UserData) +
+                @($refs.Textures) + @($refs.Expressions | ForEach-Object { $_.File }) +
+                @($refs.Motions.PSObject.Properties | ForEach-Object { $_.Value } | ForEach-Object { $_.File })) {
+                if ($file -and !$archive.GetEntry("$prefix$directory/$file")) {
+                    throw "Missing Live2D dependency for ${id}: $file"
+                }
+            }
+            Write-Host "Verified $id in the APK."
+        }
+    } finally { $archive.Dispose() }
 }
 
 function Get-AndroidDeviceRows([string] $Adb) {
@@ -211,7 +283,6 @@ switch ($Action) {
         }
         Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
-        if ($IncludeLocalModel) { Invoke-Checked node @('scripts/stage-pet-models.mjs') }
         Wait-AndroidDevice $adb $Device
         if ($autoDevice) { $Device = Show-TestEmulator $adb $Device }
         Write-Host "Launching WorldlineBox on $Device. Flutter keeps this terminal open for logs and hot reload."
@@ -223,45 +294,14 @@ switch ($Action) {
             throw 'Release requires android\key.properties and a release keystore. Omit -Release for a sideloadable debug APK.'
         }
         $mode = if ($Release) { 'release' } else { 'debug' }
-        $privateRelease = $Release -and $IncludeLocalModel
         Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
-        if ($IncludeLocalModel) {
-            $stageArguments = @('scripts/stage-pet-models.mjs')
-            if ($privateRelease) { $stageArguments += '--private-release' }
-            Invoke-Checked node $stageArguments
-        }
-        $previousPrivateModel = $env:WORLDLINEBOX_PRIVATE_ANDROID_MODEL
-        try {
-            $env:WORLDLINEBOX_PRIVATE_ANDROID_MODEL = if ($privateRelease) { '1' } else { '0' }
-            Invoke-Checked $flutter @('build', 'apk', "--$mode")
-        } finally {
-            $env:WORLDLINEBOX_PRIVATE_ANDROID_MODEL = $previousPrivateModel
-        }
+        Invoke-Checked $flutter @('build', 'apk', "--$mode")
         $built = Join-Path $root "build\app\outputs\flutter-apk\app-$mode.apk"
-        if ($Release -or $IncludeLocalModel) {
-            Add-Type -AssemblyName System.IO.Compression.FileSystem
-            $archive = [IO.Compression.ZipFile]::OpenRead($built)
-            try {
-                $modelFiles = @($archive.Entries | Where-Object { $_.FullName.StartsWith('assets/pet-models/') })
-                $registry = $archive.GetEntry('assets/pet-models/models.json')
-                if (!$registry -or !$archive.GetEntry('assets/pet-models/live2dcubismcore.min.js') -or
-                    -not ($modelFiles.FullName -match '\.moc3$') -or -not ($modelFiles.FullName -match '\.png$')) {
-                    throw 'The APK is missing required Live2D assets.'
-                }
-                if (!$IncludeLocalModel) {
-                    $reader = New-Object IO.StreamReader($registry.Open())
-                    try { $catalog = $reader.ReadToEnd() | ConvertFrom-Json }
-                    finally { $reader.Dispose() }
-                    if ($catalog.'builtin-dafeiyu'.cacheKey -notlike 'arch-chan-*') {
-                        throw 'The public APK does not contain the bundled Arch-chan model.'
-                    }
-                }
-            } finally { $archive.Dispose() }
-        }
+        if ($Release) { Assert-BundledPetModels $built }
         $output = Join-Path $root 'dist'
         New-Item -ItemType Directory -Force -Path $output | Out-Null
-        $filename = if ($privateRelease) { 'WorldlineBoxMobile-private-release.apk' } else { "WorldlineBoxMobile-$mode.apk" }
+        $filename = "WorldlineBoxMobile-$mode.apk"
         $apk = Join-Path $output $filename
         Copy-Item -LiteralPath $built -Destination $apk -Force
         Write-Output $apk

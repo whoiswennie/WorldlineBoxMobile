@@ -76,6 +76,7 @@ const _portraitIds = {
   'phoebe',
   'phrolova',
   'qwen',
+  'yachiyo-runami',
 };
 
 class CompanionAvatar extends StatelessWidget {

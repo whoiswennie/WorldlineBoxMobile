@@ -94,7 +94,7 @@ class MainActivity : FlutterActivity() {
                 val path = call.argument<String>("asset")
                 val target = call.argument<String>("path")?.let { File(it).canonicalFile }
                 val cache = File(filesDir, "pet-model-files").canonicalFile
-                if (path == null || !Regex("^(?:live2dcubismcore\\.min\\.js|model/[0-9]+(?:\\.[a-zA-Z0-9]+)+)$").matches(path) ||
+                if (path == null || !Regex("^(?:live2dcubismcore\\.min\\.js|(?:dafeiyu|yachiyo)/(?:[0-9]+(?:\\.[a-zA-Z0-9]+)+|license\\.txt))$").matches(path) ||
                     target == null || target.parentFile != cache) {
                     result.error("invalid_asset", "Invalid local model asset.", null)
                     return@setMethodCallHandler

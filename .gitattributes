@@ -1,0 +1,5 @@
+android/app/src/bundled/assets/pet-models/**/*.moc3 filter=lfs diff=lfs merge=lfs -text
+android/app/src/bundled/assets/pet-models/**/*.png filter=lfs diff=lfs merge=lfs -text
+android/app/src/bundled/assets/pet-models/dafeiyu/*.json -text whitespace=cr-at-eol
+android/app/src/bundled/assets/pet-models/yachiyo/*.json -text whitespace=cr-at-eol
+android/app/src/bundled/assets/pet-models/*/license.txt -text -whitespace

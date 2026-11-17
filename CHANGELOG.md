@@ -1,5 +1,16 @@
 # WorldlineBox Mobile 更新记录
 
+## 0.1.2 · Android
+
+本版 APK 的 Android 内部版本号为 **6**，支持 Android 7.0 及以上。使用与上一版相同的发布签名，可覆盖更新并保留配对和缓存。
+
+- 大肥鱼在手机桌宠通话中使用与 Windows 0.1.2 相同的 DeepSeek-chan 模型，包含五张原始贴图、表情和动作。
+- 新增月见八千代的内置 Live2D 和头像，与 Windows 0.1.2 使用同一份授权模型和两张原始贴图。连接桌面版后，选择月见八千代进入桌宠通话即可使用。
+- 两款 Live2D 及许可都随 APK 安装。手机在本机加载模型，并按设备内存与图形能力调整贴图尺寸。打包时逐文件核对头像、模型、贴图、表情、动作和授权。
+- 桌面配对、会话和资料沿用现有设置。
+
+[Windows 0.1.2](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.2) · [查看手机版代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.1...0.1.2)
+
 ## 0.1.1 · Android
 
 从下载区取得发布签名的 `WorldlineBoxMobile.apk` 和对应的 `WorldlineBoxMobile.apk.sha256`。本次版本号为 `0.1.1`，Android 内部版本号为 `5`，支持 Android 7.0 及以上。
@@ -10,7 +21,7 @@
 - 对话气泡限制高度，长回复自动分页。首次出现回复时，执行进度、停止按钮和分页控件可以在气泡内完整显示。支持回看、重播、收起对白和查看完整对话。
 - 与 [Windows 0.1.1](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.1) 配对后，桌宠按当前页请求 DeepSeek 语音。该页播完再自动推进。连接旧版电脑时使用旧版语音接口。
 - 改进 Android 音频缓冲、播放结束等待和停止后的清理，降低网络间隙、短语音和快速切页时的播放问题。
-- Android 和 Windows 安装包都内置 CC0 授权的 Arch-chan Live2D 模型。进入大肥鱼的桌宠会面即可使用，无需手动下载或导入模型。APK 同时包含内置通话背景。 [Arch-chan 模型与授权](https://github.com/Speykious/arch-chan)
+- Android 和 Windows 安装包都经作者授权内置 DeepSeek-chan（大肥鱼）Live2D 模型。进入大肥鱼的桌宠会面即可使用。原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko，模型使用须知随安装包提供。APK 同时包含内置通话背景。
 
 ### 开发与升级
 
