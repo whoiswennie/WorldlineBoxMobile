@@ -4,7 +4,7 @@ import { BOT_CALL_PORTRAIT_SCALE } from '../src/renderer/companion-bot/call-pres
 import '@pixi/unsafe-eval';
 
 const stage = document.getElementById('stage');
-let renderer, avatar, lastCue, presence = 'idle', fullBody = false, frame = 0, resize, fit;
+let renderer, avatar, lastCue, presence = 'idle', fullBody = false, stopFrame, resize, fit;
 
 // Older locally staged model folders only carry the manifest.
 async function readCatalog(model, manifest) {
@@ -25,7 +25,8 @@ async function readCatalog(model, manifest) {
 }
 
 function dispose() {
-  cancelAnimationFrame(frame);
+  stopFrame?.();
+  stopFrame = undefined;
   resize?.disconnect();
   avatar?.dispose();
   renderer?.destroy();
@@ -69,13 +70,9 @@ window.startPet = async ({ model, manifest, core, vts, name, catalog }) => {
       );
     };
     fit();
-    const tick = () => {
-      avatar.update();
-      frame = requestAnimationFrame(tick);
-    };
     avatar.controls.present(lastCue ?? undefined, lastCue?.text);
     avatar.controls.presence(presence);
-    tick();
+    stopFrame = renderer.onFrame(() => avatar.update());
     // Texture upload happens when Pixi draws, after load() has returned.
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const error = gl.getError();

@@ -7,7 +7,7 @@
 - 大肥鱼在手机桌宠通话中使用与 Windows 0.1.2 相同的 DeepSeek-chan 模型，包含五张原始贴图、表情和动作。
 - 新增月见八千代的内置 Live2D 和头像，与 Windows 0.1.2 使用同一份授权模型和两张原始贴图。连接桌面版后，选择月见八千代进入桌宠通话即可使用。
 - 两款 Live2D 及许可都随 APK 安装。手机在本机加载模型，并按设备内存与图形能力调整贴图尺寸。打包时逐文件核对头像、模型、贴图、表情、动作和授权。
-- 桌面配对、会话和资料沿用现有设置。
+- Android 查看器使用新版 Live2D 渲染循环驱动模型与表演。桌面配对、会话和资料沿用现有设置。
 
 [Windows 0.1.2](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.2) · [查看手机版代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.1...0.1.2)
 
