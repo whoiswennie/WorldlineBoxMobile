@@ -70,7 +70,7 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 
 聊天和桌宠通话的输入框上方都可新建或切换话题，并由电脑端 DSH 压缩当前伙伴在该话题的上下文。群聊可以选择要压缩的伙伴。
 
-「桌宠通话」使用桌面伙伴会面会话。大肥鱼有专属铃声，其他伙伴默认使用菲比的铃声。未随包提供菲比原曲时，使用内置提示音。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。
+「桌宠通话」使用桌面伙伴会面会话。手机内置与电脑相同的两段通话铃声，大肥鱼使用《Let Me Go》，其他伙伴使用菲比铃声。背景支持导入，也可使用随 App 提供的湖畔蓝调、雨中花房和秋日书房。
 
 ## 本地协议测试
 
@@ -78,6 +78,6 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 
 ## 素材与第三方组件
 
-随源码提供的三张通话背景和公开版铃声为项目生成素材。角色头像沿用桌面项目美术，来源和授权范围见[桌面项目第三方声明](https://github.com/whoiswennie/WorldlineBox/blob/main/THIRD_PARTY_NOTICES.md)。Live2D 查看器包含 SoulLink Emotion、PixiJS 和 pixi-live2d-display，原始许可证见 [`licenses`](licenses/)。
+随源码提供的三张通话背景为项目生成素材。通话铃声和角色头像沿用桌面版资源。[桌面项目第三方声明](https://github.com/whoiswennie/WorldlineBox/blob/main/THIRD_PARTY_NOTICES.md)。Live2D 查看器包含 SoulLink Emotion、PixiJS 和 pixi-live2d-display，原始许可证见 [`licenses`](licenses/)。
 
 大肥鱼（DeepSeek-chan）的原画及拆分为神宫凉子，Live2D 建模为霓虹猫_NeonNeko。月见八千代使用雪熊企划授权随世界线项目分发的模型。 [大肥鱼模型使用须知](android/app/src/bundled/assets/pet-models/dafeiyu/license.txt) · [八千代分发许可](android/app/src/bundled/assets/pet-models/yachiyo/license.txt)

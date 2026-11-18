@@ -41,13 +41,22 @@ function Assert-ApkFile($Archive, [string] $EntryName, [string] $SourcePath) {
     if ($actual -ne $expected) { throw "APK entry differs from the staged source: $EntryName" }
 }
 
-function Assert-BundledPetModels([string] $Apk) {
+function Assert-BundledCallAssets([string] $Apk) {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $source = Join-Path $root 'android/app/src/bundled/assets/pet-models'
     $expectedModels = @{ 'builtin-dafeiyu' = 'dafeiyu'; 'yachiyo-runami' = 'yachiyo' }
     $prefix = 'assets/pet-models/'
     $archive = [IO.Compression.ZipFile]::OpenRead($Apk)
     try {
+        foreach ($track in 'dafeiyu.wav', 'phoebe.wav') {
+            $entryName = "assets/call-ringtones/$track"
+            $entry = $archive.GetEntry($entryName)
+            if (!$entry -or $entry.Length -lt 1MB -or $entry.CompressedLength -ne $entry.Length) {
+                throw "Missing or compressed call ringtone: $entryName. Check Git LFS and androidResources.noCompress."
+            }
+            Assert-ApkFile $archive $entryName (Join-Path $root "android/app/src/bundled/assets/call-ringtones/$track")
+        }
+        Write-Host 'Verified both bundled call ringtones in the APK.'
         Assert-ApkFile $archive ($prefix + 'live2dcubismcore.min.js') (Join-Path $source 'live2dcubismcore.min.js')
         Assert-ApkFile $archive ($prefix + 'models.json') (Join-Path $source 'models.json')
         Assert-ApkFile $archive 'assets/flutter_assets/assets/portraits/yachiyo-runami.png' (Join-Path $root 'assets/portraits/yachiyo-runami.png')
@@ -183,27 +192,6 @@ function Receive-Archive([string] $Url, [string] $Destination) {
     Invoke-Checked curl.exe $arguments
 }
 
-function Copy-CallRingtones {
-    $source = Join-Path (Split-Path -Parent $root) 'WorldlineBox\public\companion-call'
-    $target = Join-Path $root 'android\app\src\main\assets\pet-ringtones'
-    New-Item -ItemType Directory -Force -Path $target | Out-Null
-    Copy-Item -LiteralPath (Join-Path $source 'ringtone.wav') -Destination (Join-Path $target 'common.wav') -Force
-    Copy-Item -LiteralPath (Join-Path $source 'ringtones\dafeiyu.ogg') -Destination (Join-Path $target 'dafeiyu.ogg') -Force
-
-    $originals = Join-Path (Split-Path -Parent $root) 'WorldlineBox\.tools\original-call-ringtones'
-    $debugTarget = Join-Path $root 'android\app\src\debug\assets\pet-private-ringtones'
-    foreach ($track in @(@{ Source = 'dafeiyu.wav'; Name = 'dafeiyu.wav' }, @{ Source = 'ringtone.wav'; Name = 'phoebe.wav' })) {
-        $original = Join-Path $originals $track.Source
-        $destination = Join-Path $debugTarget $track.Name
-        if (Test-Path -LiteralPath $original -PathType Leaf) {
-            New-Item -ItemType Directory -Force -Path $debugTarget | Out-Null
-            Copy-Item -LiteralPath $original -Destination $destination -Force
-        } elseif (Test-Path -LiteralPath $destination -PathType Leaf) {
-            Remove-Item -LiteralPath $destination
-        }
-    }
-}
-
 if ($Proxy) {
     if ($Proxy.Scheme -ne 'http' -or $Proxy.Port -le 0) { throw 'Use an HTTP proxy URL such as http://127.0.0.1:7897.' }
     $env:HTTP_PROXY = $Proxy.AbsoluteUri
@@ -281,7 +269,6 @@ switch ($Action) {
                 $Device = Start-TestEmulator $adb
             }
         }
-        Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
         Wait-AndroidDevice $adb $Device
         if ($autoDevice) { $Device = Show-TestEmulator $adb $Device }
@@ -294,11 +281,10 @@ switch ($Action) {
             throw 'Release requires android\key.properties and a release keystore. Omit -Release for a sideloadable debug APK.'
         }
         $mode = if ($Release) { 'release' } else { 'debug' }
-        Copy-CallRingtones
         Invoke-Checked node @('scripts/build-pet-viewer.mjs')
         Invoke-Checked $flutter @('build', 'apk', "--$mode")
         $built = Join-Path $root "build\app\outputs\flutter-apk\app-$mode.apk"
-        if ($Release) { Assert-BundledPetModels $built }
+        if ($Release) { Assert-BundledCallAssets $built }
         $output = Join-Path $root 'dist'
         New-Item -ItemType Directory -Force -Path $output | Out-Null
         $filename = "WorldlineBoxMobile-$mode.apk"

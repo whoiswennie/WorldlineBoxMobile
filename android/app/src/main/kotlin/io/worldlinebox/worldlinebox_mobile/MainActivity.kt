@@ -54,20 +54,11 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "play" -> {
                     stopRingtone()
-                    val track = call.arguments
-                    val fallback = if (track == "dafeiyu") "dafeiyu.ogg" else "common.wav"
+                    val track = if (call.arguments == "dafeiyu") "dafeiyu.wav" else "phoebe.wav"
                     try {
                         val player = MediaPlayer()
                         ringtone = player
-                        val original = when (track) {
-                            "dafeiyu" -> "pet-private-ringtones/dafeiyu.wav"
-                            "phoebe" -> "pet-private-ringtones/phoebe.wav"
-                            else -> null
-                        }
-                        val source = original?.let { file ->
-                            try { assets.openFd(file) } catch (_: java.io.FileNotFoundException) { null }
-                        } ?: assets.openFd("pet-ringtones/$fallback")
-                        source.use { descriptor ->
+                        assets.openFd("call-ringtones/$track").use { descriptor ->
                             player.setDataSource(descriptor.fileDescriptor, descriptor.startOffset, descriptor.length)
                         }
                         player.setAudioAttributes(AudioAttributes.Builder()
