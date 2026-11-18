@@ -1,6 +1,6 @@
 # WorldlineBox Mobile 更新记录
 
-## 0.3.0 · Android
+## 0.1.3 · Android
 
 下载 `WorldlineBoxMobile.apk` 即可安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 7，沿用上一版发布签名。同页提供 SHA-256 校验文件。
 
@@ -9,7 +9,7 @@
 - 会话列表显示未读消息。在电脑的「设置 → 手机连接」为本机开启信息推送，并允许 Android 通知后，后台收到伙伴回复时可在通知栏查看摘要，点按即可进入对应聊天。
 - 图片和文件单个最高支持 4 GiB。上传按网速调整分段，连接恢复后可以续传。电脑会保留未完成的分段 24 小时。
 
-[下载配套 Windows 版](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.3.0) · [查看代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.2...0.3.0)
+[下载配套 Windows 版](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.3) · [查看代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.2...0.1.3)
 
 ## 0.1.2 · Android
 
