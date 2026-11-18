@@ -17,12 +17,13 @@ extension _OpenPetCall on _CompanionWorkspaceState {
       if (result == null) return;
       final meeting = result['conversationId'] as String;
       if (!mounted || room != _room) return;
+      _activeCallRoom = meeting;
       await Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder: (_) => _PetCall(
             api: () => _api,
             room: meeting,
-            runtime: object(object(result['snapshot'])['chatRuntime']),
+            initialSnapshot: object(result['snapshot']),
             stageCatalog: object(result['callStage']),
             title: title,
             companion: companion,
@@ -31,6 +32,9 @@ extension _OpenPetCall on _CompanionWorkspaceState {
       );
     } catch (error) {
       _show(connectionError(error));
+    } finally {
+      _activeCallRoom = null;
+      if (mounted) _markVisible();
     }
   }
 }
@@ -178,14 +182,14 @@ class _PetCall extends StatefulWidget {
   const _PetCall({
     required this.api,
     required this.room,
-    required this.runtime,
+    required this.initialSnapshot,
     required this.stageCatalog,
     required this.title,
     required this.companion,
   });
   final MobileApi? Function() api;
   final String room;
-  final Json runtime;
+  final Json initialSnapshot;
   final Json stageCatalog;
   final String title;
   final String companion;
@@ -223,6 +227,7 @@ class _PetCallState extends State<_PetCall>
   StreamSubscription<Json>? _events;
   MobileApi? _eventApi;
   int? _cursor;
+  int? _publicationCursor;
   String _caption = '';
   String _background = 'lake';
   File? _custom;
@@ -231,7 +236,7 @@ class _PetCallState extends State<_PetCall>
   bool _checking = false;
   bool _voice = true;
   ({String text, String? topic, String requestId})? _attempt;
-  late Json _runtime = widget.runtime;
+  late Json _runtime = object(widget.initialSnapshot['chatRuntime']);
   bool _changingTopic = false;
   bool _interrupting = false;
   PetCallProgress? _replyProgress;
@@ -252,15 +257,32 @@ class _PetCallState extends State<_PetCall>
   void initState() {
     super.initState();
     _observedApi = widget.api();
+    _cursor = widget.initialSnapshot['cursor'] as int?;
+    _publicationCursor =
+        object(widget.initialSnapshot['callDelivery'])['cursor'] as int?;
+    for (final message in objects(widget.initialSnapshot['messages'])) {
+      if (message['senderId'] != widget.companion ||
+          !['queued', 'running'].contains(message['status'])) {
+        continue;
+      }
+      _pending.add(message['id'] as String);
+      for (final cue in objects(message['cues'])) {
+        _spoken.add("${message['id']}/${cue['id']}");
+      }
+    }
     _watchCall(_observedApi);
-    _poll = Timer.periodic(const Duration(seconds: 2), (_) {
+    _poll = Timer.periodic(const Duration(seconds: 2), (timer) {
       final api = widget.api();
       final changed = !identical(_observedApi, api);
       if (changed) setState(() => _observedApi = api);
       if (api != null && _events == null || !identical(_eventApi, api)) {
         _watchCall(api);
       }
-      unawaited(_refresh(force: changed));
+      unawaited(
+        _refresh(
+          force: changed || _publicationCursor != null && timer.tick % 5 == 0,
+        ),
+      );
     });
     unawaited(_restoreWallpaper());
     unawaited(_startStage());
@@ -294,7 +316,7 @@ class _PetCallState extends State<_PetCall>
                 _autoCue) {
               final text = event['text'] as String?;
               if (text != null) {
-                setState(() => _caption = _previewCaption(text));
+                setState(() => _caption = text);
               }
             } else if (event['type'] == 'changed') {
               _eventRefresh ??= Timer(const Duration(milliseconds: 180), () {
@@ -575,28 +597,47 @@ class _PetCallState extends State<_PetCall>
 
   Future<void> _refresh({bool force = false}) async {
     final api = widget.api();
-    if (_checking || api == null || (_pending.isEmpty && !force)) return;
+    if (_checking || api == null || (_pending.isEmpty && !force)) {
+      return;
+    }
     final topicRevision = _topicRevision;
     _checking = true;
+    var more = false;
     try {
       final state = object(
         (await api.request('state', {
           'conversationId': widget.room,
           'after': ?_cursor,
+          'callAfter': ?_publicationCursor,
           'tracked': _pending.take(20).toList(),
         }))['snapshot'],
       );
       if (!mounted || topicRevision != _topicRevision) return;
+      final previousCursor = _cursor;
       _cursor = state['cursor'] as int? ?? _cursor;
+      final delivery = object(state['callDelivery']);
+      _publicationCursor = delivery['cursor'] as int? ?? _publicationCursor;
+      more = delivery['more'] == true;
+      final published = (delivery['messageIds'] as List? ?? [])
+          .whereType<String>()
+          .toSet();
       PetCallProgress? progress;
       for (final message in objects(state['messages'])) {
-        if (!_pending.contains(message['id']) ||
-            _interruptedReplies.contains(message['id'])) {
+        final id = message['id'] as String;
+        if (message['senderId'] != widget.companion ||
+            _interruptedReplies.contains(id)) {
+          continue;
+        }
+        final fresh =
+            previousCursor != null &&
+            (message['sequence'] as int) > previousCursor;
+        if (!_pending.contains(id) && !published.contains(id) && !fresh) {
           continue;
         }
         final content = (message['content'] as String? ?? '').trim();
         final cues = objects(message['cues']);
         if (['queued', 'running'].contains(message['status'])) {
+          _pending.add(id);
           final createdAt = message['createdAt'] as String?;
           progress = _callProgress(
             object(message['progress']),
@@ -606,7 +647,7 @@ class _PetCallState extends State<_PetCall>
             queued: message['status'] == 'queued',
           );
           if (content.isNotEmpty && cues.isEmpty && !_playingCue && _autoCue) {
-            _caption = _previewCaption(content);
+            _caption = content;
           }
         }
         for (final cue in cues) {
@@ -618,7 +659,8 @@ class _PetCallState extends State<_PetCall>
         if (['sent', 'failed', 'cancelled'].contains(message['status'])) {
           _pending.remove(message['id']);
           if (cues.isEmpty &&
-              content.isNotEmpty &&
+              (content.isNotEmpty ||
+                  objects(message['captionPages']).isNotEmpty) &&
               _spoken.add(message['id'] as String)) {
             _enqueueCue({
               'text': content,
@@ -641,14 +683,11 @@ class _PetCallState extends State<_PetCall>
       if (mounted) setState(() => _error = connectionError(error));
     } finally {
       _checking = false;
-      if (mounted && topicRevision != _topicRevision) {
+      if (mounted && (topicRevision != _topicRevision || more)) {
         unawaited(_refresh(force: true));
       }
     }
   }
-
-  String _previewCaption(String text) =>
-      text.trimLeft().characters.take(36).join().split('\n').take(3).join('\n');
 
   void _enqueueCue(Json cue) {
     final pages = objects(cue['pages']).toList();

@@ -22,7 +22,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                 ),
           titleSpacing: room == null ? 20 : 0,
           title: room == null
-              ? const Text('伙伴', style: TextStyle(fontWeight: FontWeight.w700))
+              ? const BrandTitle()
               : Row(
                   children: [
                     CompanionAvatar(
@@ -52,24 +52,70 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                     : null,
                 icon: const Icon(Icons.videocam_outlined),
               ),
-            if (room == null)
-              IconButton(
-                tooltip: '我的资料',
-                icon: const Icon(Icons.person_outline),
-                onPressed: _online ? _editIdentity : null,
+            if (room == null) ...[
+              if (_api case final MobileApi api)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xffe7f2eb),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.circle,
+                        size: 7,
+                        color: Color(0xff357953),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        api.route.local ? '局域网直连' : '远程连接',
+                        style: const TextStyle(
+                          color: Color(0xff356648),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              PopupMenuButton<String>(
+                tooltip: '我的电脑',
+                icon: const Icon(Icons.more_horiz_rounded),
+                onSelected: (choice) {
+                  switch (choice) {
+                    case 'scan':
+                      _scanAddress();
+                    case 'forget':
+                      _forget();
+                    case 'identity':
+                      _editIdentity();
+                    case 'cache':
+                      _confirmClearCache();
+                    case 'notifications':
+                      _nativeAlert('settings');
+                  }
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(enabled: false, child: Text('我的电脑')),
+                  const PopupMenuItem(value: 'scan', child: Text('扫码更新地址')),
+                  PopupMenuItem(
+                    value: 'identity',
+                    enabled: _online,
+                    child: const Text('我的资料'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'notifications',
+                    child: Text('系统通知设置'),
+                  ),
+                  const PopupMenuItem(value: 'cache', child: Text('清理本地缓存')),
+                  const PopupMenuItem(value: 'forget', child: Text('取消配对')),
+                ],
               ),
-            if (room == null)
-              IconButton(
-                tooltip: '清理本地缓存',
-                icon: const Icon(Icons.cleaning_services_outlined),
-                onPressed: _confirmClearCache,
-              ),
-            if (room == null)
-              IconButton(
-                tooltip: '取消配对',
-                onPressed: _forget,
-                icon: const Icon(Icons.devices_other),
-              ),
+            ],
           ],
         ),
         body: SafeArea(
@@ -84,11 +130,12 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                     leading: Icon(
                       _connecting ? Icons.sync : Icons.cloud_off_outlined,
                     ),
-                    title: Text(_connecting ? '正在连接电脑' : '电脑离线'),
-                    subtitle: _error == null ? null : Text(_error!),
-                    trailing: TextButton(
-                      onPressed: _connecting ? null : _connect,
-                      child: const Text('重连'),
+                    title: Text(_connecting ? '正在连接我的电脑' : '等待电脑上线'),
+                    subtitle: Text(_error ?? '电脑上线后将自动重连。'),
+                    trailing: IconButton(
+                      tooltip: '扫码更新地址',
+                      icon: const Icon(Icons.qr_code_scanner),
+                      onPressed: _scanAddress,
                     ),
                   ),
                 ),
@@ -195,8 +242,13 @@ extension _WorkspaceView on _CompanionWorkspaceState {
     );
     if (agreed != true || !mounted) return;
     try {
+      _editingAddress = true;
+      _connectionVersion++;
       await widget.onForget();
+      await _nativeAlert('reset');
+      await _cache.clear();
     } catch (error) {
+      _editingAddress = false;
       _show(connectionError(error));
     }
   }
@@ -222,109 +274,253 @@ extension _WorkspaceView on _CompanionWorkspaceState {
               .contains(query),
         )
         .toList();
+
+    final count = _inbox.unread.values.fold(0, (sum, n) => sum + n);
+    Widget tab(String text, bool contacts) {
+      final selected = _contacts == contacts;
+      return InkWell(
+        onTap: () => _update(() => _contacts = contacts),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 9, 7),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    text,
+                    style: TextStyle(
+                      fontSize: selected ? 24 : 18,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? brandInk : const Color(0xff746d80),
+                    ),
+                  ),
+                  if (!contacts && count > 0) ...[
+                    const SizedBox(width: 5),
+                    _unreadBadge(count),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 4),
+              Container(
+                height: 3,
+                width: 22,
+                decoration: BoxDecoration(
+                  color: selected ? brandAccent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+          padding: const EdgeInsets.fromLTRB(16, 7, 16, 6),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              tab('消息', false),
+              const SizedBox(width: 14),
+              tab('联系人', true),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: TextField(
             controller: _search,
             onChanged: (_) => _update(() {}),
             decoration: InputDecoration(
               hintText: '搜索伙伴或会话',
-              prefixIcon: const Icon(Icons.search),
+              isDense: true,
+              hintStyle: const TextStyle(
+                color: Color(0xff80798b),
+                fontSize: 14,
+              ),
+              prefixIcon: const Icon(Icons.search_rounded, size: 21),
               filled: true,
-              fillColor: const Color(0xffededf3),
+              fillColor: const Color(0xffeeecf3),
+              suffixIcon: query.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: '清除搜索',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () => _update(_search.clear),
+                    ),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(15),
                 borderSide: BorderSide.none,
               ),
             ),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          child: Row(
-            children: [
-              ChoiceChip(
-                label: const Text('会话'),
-                selected: !_contacts,
-                onSelected: (_) => _update(() => _contacts = false),
-              ),
-              const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('联系人'),
-                selected: _contacts,
-                onSelected: (_) => _update(() => _contacts = true),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
         Expanded(
-          child: items.isEmpty
-              ? Center(
-                  child: Text(
-                    _online
-                        ? (_contacts ? '没有匹配的伙伴' : '从联系人打开一位伙伴')
-                        : '连接电脑后查看伙伴',
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _refresh,
-                  child: ListView.separated(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: items.length,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    separatorBuilder: (_, _) =>
-                        const Divider(height: 1, indent: 66),
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      final name = (item['title'] ?? item['name']) as String;
-                      final subtitle = _contacts
-                          ? _presenceLabel(item['presence'] as String?)
-                          : object(item['activity'])['preview'] as String?;
-                      return ListTile(
-                        leading: CompanionAvatar(
-                          id: _contacts
-                              ? item['id'] as String
-                              : _roomAvatar(item),
-                          name: name,
-                        ),
-                        title: Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: subtitle == null
+          child: Material(
+            color: Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            clipBehavior: Clip.antiAlias,
+            child: items.isEmpty
+                ? Center(
+                    child: Text(
+                      query.isNotEmpty
+                          ? '没有找到匹配的结果'
+                          : _online
+                          ? '从联系人打开一位伙伴'
+                          : '连接电脑后查看伙伴',
+                    ),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(vertical: 5),
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) => const Divider(
+                        height: 1,
+                        indent: 82,
+                        endIndent: 18,
+                        color: Color(0xffefedf2),
+                      ),
+                      itemBuilder: (_, index) {
+                        final item = items[index];
+                        final name = (item['title'] ?? item['name']) as String;
+                        final id = item['id'] as String;
+                        final activity = object(item['activity']);
+                        final unread = _contacts ? 0 : _inbox.unread[id] ?? 0;
+                        final preview = _contacts
+                            ? _presenceLabel(item['presence'] as String?)
+                            : activity['preview'] as String?;
+                        final time = _contacts
                             ? null
-                            : Text(
-                                subtitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                        trailing: item['pinned'] == true
-                            ? const Icon(Icons.push_pin_outlined, size: 16)
-                            : null,
-                        onTap: _contacts
-                            ? () => _openCompanion(item)
-                            : () => _selectRoom(item['id'] as String),
-                      );
-                    },
+                            : _messageTime(activity['updatedAt'] as String?);
+                        return InkWell(
+                          onTap: _contacts
+                              ? () => _openCompanion(item)
+                              : () => _selectRoom(id),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 14,
+                            ),
+                            child: Row(
+                              children: [
+                                CompanionAvatar(
+                                  id: _contacts ? id : _roomAvatar(item),
+                                  name: name,
+                                  size: 47,
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: unread > 0
+                                                    ? FontWeight.w700
+                                                    : FontWeight.w600,
+                                                color: brandInk,
+                                              ),
+                                            ),
+                                          ),
+                                          if (item['pinned'] == true)
+                                            const Padding(
+                                              padding: EdgeInsets.only(
+                                                right: 4,
+                                              ),
+                                              child: Icon(
+                                                Icons.push_pin_outlined,
+                                                size: 13,
+                                              ),
+                                            ),
+                                          if (time != null)
+                                            Text(
+                                              time,
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                color: Color(0xff817a8a),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      if (preview != null || unread > 0) ...[
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                preview ?? '',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  fontSize: 13,
+                                                  color: Color(0xff716b7c),
+                                                ),
+                                              ),
+                                            ),
+                                            if (unread > 0)
+                                              _unreadBadge(unread),
+                                          ],
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                ),
+          ),
         ),
       ],
     );
+  }
+
+  Widget _unreadBadge(int count) => Badge(
+    backgroundColor: const Color(0xffb93653),
+    textColor: Colors.white,
+    label: Text(count > 99 ? '99+' : '$count'),
+  );
+
+  String? _messageTime(String? stamp) {
+    final date = DateTime.tryParse(stamp ?? '')?.toLocal();
+    if (date == null) return null;
+    final now = DateTime.now();
+    if (DateUtils.isSameDay(date, now)) {
+      return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    }
+    if (DateUtils.isSameDay(date, DateTime(now.year, now.month, now.day - 1))) {
+      return '昨天';
+    }
+    return '${date.month}/${date.day}';
   }
 
   Widget _chatView(String room, String title, String avatarId, Json? current) {
     final messages = _messages;
     final files = _attachments[room] ?? [];
     final queued = objects(_runtime['queued']);
-    final enabled = _online && _snapshot.isNotEmpty && !_sending && !_uploading;
+    final enabled =
+        _online && _snapshot.isNotEmpty && !_sending && !_roomUploading;
     final canSend =
         !_sending &&
-        !_uploading &&
+        !_roomUploading &&
         !_changingTopic &&
         (!_online || _snapshot.isNotEmpty);
     final pending = _outbox.entries
@@ -464,14 +660,33 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                                 ),
                                 onDeleted: _sending
                                     ? null
-                                    : () => _update(() => files.remove(file)),
+                                    : () { _update(() => files.remove(file)); _scheduleCache(); }
                               ),
                             ),
                           )
                           .toList(),
                     ),
                   ),
-                if (_uploading) LinearProgressIndicator(value: _uploadProgress),
+                if (_roomUploading) ...[
+                  if (_uploads[_uploadId] case final Json upload)
+                    ListTile(
+                      dense: true,
+                      title: Text(
+                        upload['name'] as String,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${_uploadWaiting ? "等待网络，恢复后继续" : "上传中"} · ${((_uploadProgress ?? 0) * 100).floor()}%',
+                      ),
+                      trailing: IconButton(
+                        tooltip: '取消上传',
+                        onPressed: _cancelUpload,
+                        icon: const Icon(Icons.close),
+                      ),
+                    ),
+                  LinearProgressIndicator(value: _uploadProgress),
+                ],
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -884,20 +1099,17 @@ extension _WorkspaceView on _CompanionWorkspaceState {
               },
             ),
           OutlinedButton.icon(
-            onPressed:
-                _online &&
-                    !_downloading.contains(key) &&
-                    file['storage'] != 'external'
-                ? () => _download(message, file)
-                : null,
+            onPressed: _downloading.contains(key)
+                ? () => _update(() => _cancelledDownloads.add(key))
+                : _online && (file['storage'] != 'external' || _api!.downloadsOriginal) ? () => _download(message, file) : null,
             icon: Icon(
               _downloading.contains(key)
-                  ? Icons.hourglass_empty
+                  ? Icons.cancel_outlined
                   : Icons.download_outlined,
               size: 18,
             ),
             label: Text(
-              file['name'] as String? ?? '附件',
+              _downloading.contains(key) ? '取消下载 · ${file['name']}' : file['name'] as String? ?? '附件',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),

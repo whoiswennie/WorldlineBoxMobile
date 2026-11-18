@@ -18,6 +18,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import 'mobile_api.dart';
+import 'app_brand.dart';
+import 'message_inbox.dart';
+import 'resumable_upload.dart';
 import 'mobile_speech.dart';
 import 'pet_call_bubble.dart';
 import 'chat_cache.dart';
@@ -26,6 +29,7 @@ import 'profile.dart';
 
 part 'chat_view.dart';
 part 'chat_controls.dart';
+part 'chat_alerts.dart';
 part 'pet_call.dart';
 
 const _uuid = Uuid();
@@ -36,10 +40,12 @@ class CompanionWorkspace extends StatefulWidget {
     super.key,
     required this.profile,
     required this.onForget,
+    required this.saveProfile,
     this.initialConnection,
   });
   final HostProfile profile;
   final Future<void> Function() onForget;
+  final Future<void> Function(HostProfile) saveProfile;
   final MobileApi? initialConnection;
 
   @override
@@ -47,7 +53,7 @@ class CompanionWorkspace extends StatefulWidget {
 }
 
 class _CompanionWorkspaceState extends State<CompanionWorkspace>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, RouteAware {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _speech = MobileSpeech();
@@ -63,8 +69,22 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   final _streaming = <String, String>{};
   final _liveProgress = <String, Json>{};
   final _downloading = <String>{};
+  final _cancelledDownloads = <String>{};
   final _imageCache = <String, Future<Uint8List>>{};
   MobileApi? _api;
+  late HostProfile _profile = widget.profile;
+  int _connectionVersion = 0;
+  final _inbox = MessageInbox();
+  late final Future<void> _cacheReady;
+  bool _pushEnabled = false;
+  bool _refreshing = false;
+  bool _refreshAgain = false;
+  bool _refreshJump = false;
+  String? _activeCallRoom;
+  Map<String, dynamic>? _pendingChat;
+  ModalRoute<dynamic>? _observedRoute;
+  bool _editingAddress = false;
+  bool _checkingRoute = false;
   StreamSubscription<Json>? _events;
   Timer? _retry;
   int _reconnectFailures = 0;
@@ -89,10 +109,17 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   bool _uploading = false;
   bool _changingTopic = false;
   double? _uploadProgress;
+  final _uploads = <String, Json>{};
+  String? _uploadId;
+  bool _uploadWaiting = false;
   int _roomGeneration = 0;
   int _refreshGeneration = 0;
 
   void _update(VoidCallback change) => setState(change);
+
+  bool get _roomUploading =>
+      _uploading &&
+      (_uploadId == null || _uploads.values.any((job) => job['room'] == _room));
 
   bool get _online => _api != null;
   Json get _runtime => object(_snapshot['chatRuntime']);
@@ -120,9 +147,14 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_restoreCache());
+    _cacheReady = _restoreCache();
+    messageChannel.setMethodCallHandler((call) async {
+      if (call.method == 'open') await _takeChat();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => unawaited(_takeChat()));
     _poll = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (_online && _room == null) unawaited(_refresh());
+      if (_online) unawaited(_refresh());
+      unawaited(_checkRoute());
     });
     if (widget.initialConnection case final MobileApi api) {
       _api = api;
@@ -137,6 +169,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      unawaited(_takeChat());
       if (_online) {
         unawaited(_refresh());
         unawaited(_flushOutbox());
@@ -147,7 +180,23 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && route != _observedRoute) {
+      workspaceRoutes.unsubscribe(this);
+      _observedRoute = route;
+      workspaceRoutes.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didPopNext() => _markVisible();
+
+  @override
   void dispose() {
+    workspaceRoutes.unsubscribe(this);
+    messageChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     _retry?.cancel();
     _refreshTimer?.cancel();
@@ -168,33 +217,132 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   }
 
   Future<void> _connect() async {
-    if (_connecting || _online || !mounted) return;
+    if (_connecting || _online || _editingAddress || !mounted) return;
+    final version = _connectionVersion;
     _retry?.cancel();
     setState(() {
       _connecting = true;
       _error = null;
     });
     try {
-      final api = await MobileApi.connect(widget.profile);
-      if (!mounted) {
+      final api = await MobileApi.connect(_profile);
+      if (!mounted || version != _connectionVersion) {
         await api.close();
         return;
       }
-      setState(() {
-        _api = api;
-        _reconnectFailures = 0;
-        _imageCache.clear();
-      });
-      _watchRoom();
-      unawaited(_loadIdentity());
-      await _refresh();
-      unawaited(_flushOutbox());
+      await _useConnection(api);
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || version != _connectionVersion) return;
       setState(() => _error = connectionError(error));
       _scheduleReconnect();
     } finally {
       if (mounted) setState(() => _connecting = false);
+      if (mounted &&
+          version != _connectionVersion &&
+          !_editingAddress &&
+          !_online) {
+        _scheduleReconnect();
+      }
+    }
+  }
+
+  Future<void> _remember(HostProfile next) async {
+    if (jsonEncode(_profile.toJson()) == jsonEncode(next.toJson())) return;
+    await widget.saveProfile(next);
+    if (mounted) _profile = next;
+  }
+
+  Future<void> _useConnection(MobileApi api) async {
+    final version = _connectionVersion;
+    try {
+      await _remember(api.profile);
+    } catch (_) {
+      await api.close();
+      rethrow;
+    }
+    if (!mounted || version != _connectionVersion) {
+      await api.close();
+      return;
+    }
+    final previous = _api;
+    _retry?.cancel();
+    setState(() {
+      _api = api;
+      _reconnectFailures = 0;
+      _error = null;
+      _imageCache.clear();
+    });
+    _watchRoom();
+    unawaited(previous?.close());
+    unawaited(_resumeUploads());
+    unawaited(_loadIdentity());
+    unawaited(_refresh());
+    unawaited(_flushOutbox());
+  }
+
+  bool get _canSwitchRoute =>
+      !_editingAddress &&
+      !_sending &&
+      !_uploading &&
+      !_draining &&
+      _downloading.isEmpty &&
+      _readingMessage == null &&
+      ModalRoute.of(context)?.isCurrent == true &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+
+  Future<void> _checkRoute() async {
+    final active = _api;
+    if (active == null || _checkingRoute || !_canSwitchRoute) return;
+    _checkingRoute = true;
+    try {
+      if (active.route.local) {
+        final remote = await active.currentRemoteHost();
+        if (mounted &&
+            identical(_api, active) &&
+            !_editingAddress &&
+            remote != null &&
+            remote != _profile.remoteHost) {
+          await _remember(_profile.withRoutes(remote: remote));
+        }
+      } else {
+        final local = await MobileApi.connect(_profile, localOnly: true);
+        if (!mounted || !identical(_api, active) || !_canSwitchRoute) {
+          await local.close();
+          return;
+        }
+        await _useConnection(local);
+      }
+    } catch (_) {
+      // The active route remains usable while another route is unavailable.
+    } finally {
+      _checkingRoute = false;
+    }
+  }
+
+  Future<void> _scanAddress() async {
+    if (_editingAddress) return;
+    _editingAddress = true;
+    _connectionVersion++;
+    _retry?.cancel();
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (page) => PairingPage(
+            saved: _profile,
+            onSave: (profile, api) async {
+              if (!mounted || !page.mounted) {
+                await api.close();
+                return;
+              }
+              await _useConnection(api);
+              if (page.mounted) Navigator.pop(page);
+            },
+          ),
+        ),
+      );
+    } finally {
+      _editingAddress = false;
+      if (mounted && !_online) _scheduleReconnect();
     }
   }
 
@@ -226,7 +374,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     }
 
     _events = api
-        .events(room)
+        .events(room, inbox: api.supportsInbox)
         .listen(
           (event) {
             if (!mounted ||
@@ -261,6 +409,23 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   }
 
   Future<void> _refresh({bool jump = false}) async {
+    _refreshAgain = true;
+    _refreshJump |= jump;
+    if (_refreshing) return;
+    _refreshing = true;
+    try {
+      await _cacheReady;
+      while (mounted && _refreshAgain) {
+        final follow = _refreshJump;
+        _refreshJump = _refreshAgain = false;
+        await _refreshOnce(jump: follow);
+      }
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  Future<void> _refreshOnce({required bool jump}) async {
     final api = _api;
     if (api == null) return;
     final room = _room;
@@ -269,6 +434,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       final value = await api.request('state', {
         'conversationId': ?room,
         'after': ?_cursor[room],
+        if (api.supportsInbox) 'inboxAfter': _inbox.cursor ?? -1,
         if (room != null)
           'tracked': (_recent[room]?.values ?? const <Json>[])
               .where((item) => ['running', 'queued'].contains(item['status']))
@@ -284,6 +450,40 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       }
       final follow = jump || _nearBottom;
       final state = object(value['snapshot']);
+      final rooms = objects(state['conversations']);
+      final page = object(state['inbox']);
+      final legacy = api.supportsInbox
+          ? null
+          : await _inbox.readLegacy(
+              rooms,
+              objects(
+                state['companions'],
+              ).map((c) => c['id'] as String).toSet(),
+              (id, before) async => object(
+                (await api.request('state', {
+                  'conversationId': id,
+                  'history': true,
+                  'before': ?before,
+                }))['snapshot'],
+              ),
+            );
+      if (!mounted || !identical(_api, api) || room != _room) return;
+      _markVisible();
+      final visible = _visibleRoom;
+      final alerts = legacy != null
+          ? _inbox.applyLegacy(legacy.heads, legacy.messages, visible)
+          : _inbox.apply(
+              page,
+              rooms.map((r) => r['id'] as String).toSet(),
+              visible,
+            );
+      final pushAfter = page['pushAfter'] as int?;
+      final wasEnabled = _pushEnabled;
+      _pushEnabled = pushAfter != null;
+      if (_pushEnabled != wasEnabled) {
+        await _nativeAlert('configure', _pushEnabled);
+      }
+      if (!mounted) return;
       setState(() {
         _directory = {
           'companions': state['companions'],
@@ -318,7 +518,17 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
           _liveProgress.removeWhere((key, _) => !active.contains(key));
         }
       });
-      _scheduleCache();
+      _openPendingChat();
+      _markVisible();
+      for (final alert in alerts.entries) {
+        _presentMessage(alert.key, alert.value, pushAfter);
+      }
+      if (page['more'] == true) _refreshAgain = true;
+      if (alerts.isNotEmpty || _pushEnabled != wasEnabled) {
+        await _saveCache();
+      } else {
+        _scheduleCache();
+      }
       if (room != null && follow) _jumpToLatest();
     } catch (error) {
       if (!mounted || room != _room || generation != _refreshGeneration) return;
@@ -340,7 +550,10 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   });
 
   void _selectRoom(String? room) {
-    if (_room == room) return;
+    if (_room == room) {
+      _markVisible();
+      return;
+    }
     unawaited(_speech.stop());
     if (_recordingRoom != null) {
       _recordingRoom = null;
@@ -356,6 +569,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       _imageCache.clear();
       _changingTopic = false;
     });
+    _markVisible();
     _composer.text = _drafts[room] ?? '';
     _watchRoom();
     _jumpToLatest();
@@ -405,7 +619,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
 
   Future<void> _send({String delivery = 'queue'}) async {
     final room = _room;
-    if (room == null || _sending || _uploading || _changingTopic) return;
+    if (room == null || _sending || _roomUploading || _changingTopic) return;
     final text = _composer.text.trim();
     final ids = (_attachments[room] ?? []).map((file) => file['id']).toList();
     final quote = _quotes[room];
@@ -425,12 +639,12 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     }
     final requestId = _uuid.v4();
     _outbox[requestId] = {...fields, 'requestId': requestId};
+    final stagedFiles = _attachments.remove(room);
     setState(() => _sending = true);
     try {
       await _saveCache(requireDisk: true);
       if (!mounted) return;
       setState(() {
-        _attachments.remove(room);
         if (identical(_quotes[room], quote)) _quotes.remove(room);
         if (_drafts[room]?.trim() == text) _drafts.remove(room);
         if (_room == room && _composer.text.trim() == text) _composer.clear();
@@ -439,6 +653,9 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       unawaited(_flushOutbox());
     } catch (_) {
       _outbox.remove(requestId);
+      if (stagedFiles != null) {
+        _attachments[room] = [...stagedFiles, ...?_attachments[room]];
+      }
       _show('无法保存待发送消息，请清理手机存储后重试。');
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -597,101 +814,109 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       final selection = await FilePicker.platform.pickFiles(
         allowMultiple: true,
         withData: false,
-        withReadStream: true,
       );
       if (selection == null || !mounted) return;
       for (final file in selection.files) {
-        if (!mounted) return;
-        if ((_attachments[room]?.length ?? 0) >= 16) {
+        if ((_attachments[room]?.length ?? 0) +
+                _uploads.values.where((u) => u['room'] == room).length >=
+            16) {
           _show('每条消息最多 16 个附件。');
           break;
         }
-        try {
-          final path = file.path;
-          if (path == null) throw const MobileException('无法读取该文件。');
-          final attachment = await _uploadResumable(
-            room,
-            file.name,
-            File(path),
-            file.size,
+        if (file.path == null || file.size > api.maxUploadBytes) {
+          _show(
+            '${file.name} · ${file.path == null ? "无法读取文件" : "单个文件最多 ${api.maxUploadBytes ~/ 1048576} MiB"}',
           );
-          if (!mounted) return;
-          setState(() {
-            final files = _attachments.putIfAbsent(room, () => []);
-            if (!files.any((file) => file['id'] == attachment['id'])) {
-              files.add(attachment);
-            }
-          });
-        } catch (error) {
-          _show('${file.name} · ${connectionError(error)}');
+          continue;
         }
+        final stat = await File(file.path!).stat();
+        _uploads[_uuid.v4()] = {
+          'name': file.name,
+          'path': file.path,
+          'size': stat.size,
+          'modified': stat.modified.millisecondsSinceEpoch,
+          'room': room,
+        };
       }
+      await _saveCache(requireDisk: true);
     } catch (error) {
       _show(connectionError(error));
     } finally {
       if (mounted) {
+        setState(() => _uploading = false);
+        unawaited(_resumeUploads());
+      }
+    }
+  }
+
+  Future<void> _resumeUploads() async {
+    if (!mounted || !_online || _uploading || _uploads.isEmpty) return;
+    setState(() => _uploading = true);
+    try {
+      while (mounted && _uploads.isNotEmpty) {
+        final entry = _uploads.entries.first;
+        final job = entry.value,
+            id = entry.key,
+            room = job['room'] as String,
+            size = job['size'] as int;
+        setState(() {
+          _uploadId = id;
+          _uploadWaiting = false;
+          _uploadProgress = 0;
+        });
+        try {
+          final attachment = await resumeUpload(
+            id: id,
+            room: room,
+            name: job['name'] as String,
+            file: File(job['path'] as String),
+            size: size,
+            modified: job['modified'] as int,
+            connection: () => _api,
+            cancelled: () => !mounted || !_uploads.containsKey(id),
+            progress: (done, waiting) {
+              if (mounted) {
+                setState(() {
+                  _uploadProgress = size == 0 ? 1 : done / size;
+                  _uploadWaiting = waiting;
+                });
+              }
+            },
+          );
+          if (!mounted) return;
+          if (attachment != null && _uploads.containsKey(id)) {
+            final draft = _attachments.putIfAbsent(room, () => []);
+            if (!draft.any((a) => a['id'] == attachment['id'])) {
+              draft.add(attachment);
+            }
+          }
+        } catch (error) {
+          if (mounted) _show('${job['name']} · ${connectionError(error)}');
+        }
+        if (!mounted) return;
+        _uploads.remove(id);
+        await _saveCache();
+      }
+    } finally {
+      if (mounted) {
         setState(() {
           _uploading = false;
+          _uploadId = null;
           _uploadProgress = null;
         });
       }
     }
   }
 
-  Future<Json> _uploadResumable(
-    String room,
-    String name,
-    File file,
-    int size,
-  ) async {
-    final max = _api?.maxUploadBytes ?? 0;
-    if (size > max) throw const MobileException('文件超过电脑允许的上传大小。');
-    final id = _uuid.v4();
-    final source = await file.open();
-    var offset = 0;
-    var failures = 0;
+  Future<void> _cancelUpload() async {
+    final id = _uploadId, job = _uploads[_uploadId];
+    if (id == null || job == null) return;
+    setState(() => _uploads.remove(id));
+    await _saveCache();
     try {
-      while (mounted) {
-        try {
-          final api = _api;
-          if (api == null) throw const MobileException('正在等待电脑重连。');
-          if (failures > 0) {
-            final state = await api.uploadStatus(room, id);
-            if (state['attachment'] != null) return object(state['attachment']);
-            offset = state['offset'] as int;
-          }
-          await source.setPosition(offset);
-          final bytes = await source.read((size - offset).clamp(0, 256 * 1024));
-          if (offset < size && bytes.isEmpty) {
-            throw const MobileException('读取文件失败。', status: 400);
-          }
-          final result = await api.uploadPart(
-            room,
-            id,
-            name,
-            size,
-            offset,
-            bytes,
-          );
-          if (result['attachment'] != null) return object(result['attachment']);
-          offset = result['offset'] as int;
-          failures = 0;
-          if (mounted) {
-            setState(() => _uploadProgress = size == 0 ? 1 : offset / size);
-          }
-        } catch (error) {
-          if (error is MobileException &&
-              [400, 401, 403, 413].contains(error.status)) {
-            rethrow;
-          }
-          if (++failures > 8) rethrow;
-          if (mounted) setState(() => _uploadProgress = null);
-          await Future<void>.delayed(Duration(seconds: failures.clamp(1, 5)));
-        }
-      }
-      throw const MobileException('上传已取消。');
-    } finally {
-      await source.close();
+      await _api?.cancelUpload(job['room'] as String, id);
+    } catch (_) {
+      /* Abandoned parts expire on the desktop. */
     }
   }
 
@@ -730,17 +955,70 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         'worldlinebox-download-',
       );
       final file = File('${temporary.path}${Platform.pathSeparator}attachment');
-      final response = await api.download(
-        message['conversationId'] as String,
-        messageId,
-        id,
-      );
-      await response
-          .timeout(const Duration(seconds: 60))
-          .pipe(file.openWrite());
-      if (await file.length() != attachment['size']) {
-        throw const MobileException('文件大小校验失败。');
+      await file.create();
+      final size = attachment['size'] as int;
+      if (size == 0) {
+        final response = await api.download(
+          message['conversationId'] as String,
+          messageId,
+          id,
+        );
+        await response.drain<void>();
       }
+      int failures = 0;
+      while (mounted &&
+          !_cancelledDownloads.contains(key) &&
+          await file.length() < size) {
+        final offset = await file.length();
+        try {
+          final active = _api;
+          if (active == null) throw const SocketException('offline');
+          final response = await active.download(
+            message['conversationId'] as String,
+            messageId,
+            id,
+            offset: offset,
+          );
+          if (response.statusCode == 206 &&
+              response.headers.value(HttpHeaders.contentRangeHeader) !=
+                  'bytes $offset-${size - 1}/$size') {
+            throw const MobileException('下载分段与原文件不一致。', status: 400);
+          }
+          final append = response.statusCode == 206;
+          final output = await file.open(
+            mode: append ? FileMode.append : FileMode.write,
+          );
+          var written = append ? offset : 0;
+          try {
+            await for (final bytes in response.timeout(
+              const Duration(seconds: 60),
+            )) {
+              if (!mounted || _cancelledDownloads.contains(key)) return;
+              written += bytes.length;
+              if (written > size) {
+                throw const MobileException('文件大小校验失败。', status: 400);
+              }
+              await output.writeFrom(bytes);
+            }
+          } finally {
+            await output.close();
+          }
+          if (written != size) {
+            throw const SocketException('incomplete transfer');
+          }
+        } catch (error) {
+          if (error is FileSystemException ||
+              error is MobileException &&
+                  error.status != null &&
+                  error.status! < 500) {
+            rethrow;
+          }
+          if (await file.length() > offset) failures = 0;
+          failures++;
+          await Future<void>.delayed(Duration(seconds: min(15, failures)));
+        }
+      }
+      if (!mounted || _cancelledDownloads.contains(key)) return;
       if (attachment['sha256'] case final String expected) {
         final actual = await sha256.bind(file.openRead()).first;
         if (actual.toString() != expected) {
@@ -761,6 +1039,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       try {
         await temporary?.delete(recursive: true);
       } catch (_) {}
+      _cancelledDownloads.remove(key);
       if (mounted) setState(() => _downloading.remove(key));
     }
   }
@@ -769,6 +1048,16 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     final saved = await _cache.read();
     if (!mounted) return;
     setState(() {
+      final inbox = object(saved['inbox']);
+      _inbox.restore(inbox);
+      final transfers = object(saved['transfers']);
+      for (final entry in object(transfers['pending']).entries) {
+        _uploads[entry.key] = object(entry.value);
+      }
+      for (final entry in object(transfers['drafts']).entries) {
+        _attachments[entry.key] = objects(entry.value);
+      }
+      _pushEnabled = inbox['pushEnabled'] == true;
       if (_directory.isEmpty) _directory = object(saved['directory']);
       for (final entry in object(saved['own']).entries) {
         _own.putIfAbsent(entry.key, () => objects(entry.value));
@@ -781,6 +1070,9 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         }
       }
     });
+    if (_pushEnabled) await _nativeAlert('configure', true);
+    _openPendingChat();
+    unawaited(_resumeUploads());
     unawaited(_flushOutbox());
   }
 
@@ -826,6 +1118,14 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     });
   }
 
+  Json get _transferJournal => {
+    'pending': Map.of(_uploads),
+    'drafts': {
+      for (final e in _attachments.entries)
+        if (e.value.isNotEmpty) e.key: List.of(e.value),
+    },
+  };
+
   Future<void> _saveCache({bool requireDisk = false}) async {
     try {
       await _cache.write(
@@ -851,6 +1151,8 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
           ),
         ),
         outbox: _outbox,
+        transfers: _transferJournal,
+        inbox: {..._inbox.toJson(), 'pushEnabled': _pushEnabled},
       );
     } on FileSystemException {
       if (requireDisk) rethrow;
@@ -863,11 +1165,13 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     _cacheWrite = null;
     try {
       // Keep the delivery journal durable while clearing display data.
-      if (_outbox.isEmpty) {
-        await _cache.clear();
-      } else {
-        await _cache.write({}, {}, outbox: _outbox);
-      }
+      await _cache.write(
+        {},
+        {},
+        outbox: _outbox,
+        transfers: _transferJournal,
+        inbox: {..._inbox.toJson(), 'pushEnabled': _pushEnabled},
+      );
       final support = await getApplicationSupportDirectory();
       final models = Directory('${support.path}/pet-model-files');
       if (await models.exists()) await models.delete(recursive: true);

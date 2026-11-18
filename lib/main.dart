@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import 'chat.dart';
+import 'app_brand.dart';
 import 'mobile_api.dart';
 import 'pairing.dart';
 import 'profile.dart';
@@ -67,15 +68,17 @@ class _WorldlineBoxMobileState extends State<WorldlineBoxMobile> {
     final profile = _profile;
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: '世界线盒子',
+      title: appName,
+      navigatorObservers: [workspaceRoutes],
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xff6959a3),
           surface: const Color(0xfff7f7fa),
         ),
-        scaffoldBackgroundColor: const Color(0xfff7f7fa),
+        scaffoldBackgroundColor: brandPaper,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xfff7f7fa),
+          backgroundColor: brandPaper,
+          surfaceTintColor: Colors.transparent,
           foregroundColor: Color(0xff252634),
         ),
         inputDecorationTheme: const InputDecorationTheme(
@@ -83,13 +86,14 @@ class _WorldlineBoxMobileState extends State<WorldlineBoxMobile> {
         ),
       ),
       home: _loading
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          ? const BrandLaunch()
           : profile == null
           ? PairingPage(onSave: _save, initialError: _error)
           : CompanionWorkspace(
               profile: profile,
               initialConnection: _pairedConnection,
               onForget: _forget,
+              saveProfile: _store.save,
             ),
     );
   }

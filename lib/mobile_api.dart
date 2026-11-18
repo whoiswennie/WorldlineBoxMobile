@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 
 import 'profile.dart';
+import 'computer_connection.dart';
 import 'websocket_ssh.dart';
 
 typedef Json = Map<String, dynamic>;
@@ -23,7 +24,15 @@ class MobileException implements Exception {
 }
 
 class MobileApi {
-  MobileApi._(this._client, this._server, this._token);
+  MobileApi._(
+    this._client,
+    this._server,
+    this._token,
+    this.route,
+    this.profile,
+  );
+  final ComputerRoute route;
+  HostProfile profile;
 
   final SSHClient _client;
   final ServerSocket _server;
@@ -32,13 +41,28 @@ class MobileApi {
   final Set<Socket> _sockets = {};
   bool _closed = false;
   int maxUploadBytes = 0;
+  int uploadChunkBytes = 256 * 1024;
+  bool supportsInbox = false;
+  bool downloadsOriginal = false;
   bool pagedSpeech = false;
 
   static Future<MobileApi> connect(
     HostProfile profile, {
     String? pairingCode,
     String? deviceName,
-  }) async {
+    bool localOnly = false,
+  }) => connectComputer(
+    profile,
+    (route) => _dial(profile, route, pairingCode, deviceName),
+    localOnly: localOnly,
+  );
+
+  static Future<MobileApi> _dial(
+    HostProfile profile,
+    ComputerRoute route,
+    String? pairingCode,
+    String? deviceName,
+  ) async {
     final identities = <SSHKeyPair>[];
     try {
       if (profile.privateKey.isNotEmpty) {
@@ -53,12 +77,12 @@ class MobileApi {
       throw const MobileException('无法读取 SSH 私钥，请检查文件和口令。');
     }
 
-    final socket = profile.transport == 'wss'
-        ? await WebSocketSsh.connect(profile.host)
+    final socket = !route.local
+        ? await WebSocketSsh.connect(route.host)
         : await SSHSocket.connect(
-            profile.host,
-            profile.sshPort,
-            timeout: const Duration(seconds: 12),
+            route.host,
+            route.port,
+            timeout: const Duration(seconds: 3),
           );
     var fingerprintMismatch = false;
     final client = SSHClient(
@@ -85,7 +109,7 @@ class MobileApi {
     try {
       await client.authenticated;
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-      api = MobileApi._(client, server, profile.token);
+      api = MobileApi._(client, server, profile.token, route, profile);
       final connection = api;
       server.listen(
         (socket) => unawaited(connection._forward(socket, profile.apiPort)),
@@ -107,12 +131,25 @@ class MobileApi {
           },
         );
         await api.close();
-        return await connect(profile);
+        return await _dial(profile, route, null, null);
       }
       final health = await api._json('GET', 'health');
       if (health['protocol'] != 1) throw const MobileException('电脑端移动协议版本不兼容。');
+      api.uploadChunkBytes =
+          ((health['uploadChunkBytes'] as int?) ?? 256 * 1024).clamp(
+            32 * 1024,
+            1024 * 1024,
+          );
       api.maxUploadBytes = health['maxUploadBytes'] as int;
+      api.downloadsOriginal = health['downloadOriginal'] == true;
+      api.supportsInbox = health['inbox'] == true;
       api.pagedSpeech = health['pagedSpeech'] == true;
+      api.profile = profile.withRoutes(
+        remote: validRemoteHost(health['remoteHost'])
+            ? health['remoteHost'] as String
+            : null,
+        local: [if (route.local) (host: route.host, port: route.port)],
+      );
       return api;
     } catch (_) {
       if (api != null) {
@@ -127,6 +164,11 @@ class MobileApi {
       }
       rethrow;
     }
+  }
+
+  Future<String?> currentRemoteHost() async {
+    final host = (await _json('GET', 'health'))['remoteHost'];
+    return validRemoteHost(host) ? host as String : null;
   }
 
   Future<void> _forward(Socket socket, int port) async {
@@ -271,6 +313,9 @@ class MobileApi {
     return _readJson(response);
   }
 
+  Future<Json> cancelUpload(String room, String id) =>
+      _json('DELETE', 'upload', query: {'conversationId': room, 'id': id});
+
   Future<Json> uploadStatus(String room, String id) =>
       _json('GET', 'upload', query: {'conversationId': room, 'id': id});
 
@@ -321,8 +366,9 @@ class MobileApi {
     }
   }
 
-  Stream<Json> events(String? conversationId) async* {
+  Stream<Json> events(String? conversationId, {bool inbox = false}) async* {
     final request = await _open('GET', 'events', {
+      if (inbox) 'inbox': '1',
       'conversationId': ?conversationId,
     });
     final response = await request.close().timeout(
@@ -376,13 +422,17 @@ class MobileApi {
   Future<HttpClientResponse> download(
     String conversationId,
     String messageId,
-    String id,
-  ) async {
+    String id, {
+    int offset = 0,
+  }) async {
     final request = await _open('GET', 'files', {
       'conversationId': conversationId,
       'messageId': messageId,
       'id': id,
     });
+    if (offset > 0) {
+      request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-');
+    }
     final response = await request.close().timeout(
       const Duration(seconds: 45),
       onTimeout: () {
@@ -390,7 +440,7 @@ class MobileApi {
         throw const MobileException('电脑未开始传输附件。');
       },
     );
-    if (response.statusCode != 200) {
+    if (response.statusCode != 200 && response.statusCode != 206) {
       await response.drain<void>();
       throw MobileException('此附件暂时无法下载。', status: response.statusCode);
     }

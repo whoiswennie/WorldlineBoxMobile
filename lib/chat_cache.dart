@@ -41,11 +41,15 @@ class ChatCache {
     Json directory,
     Map<String, List<Json>> own, {
     Json outbox = const {},
+    Json? inbox,
+    Json? transfers,
   }) => _enqueue((file) async {
     final payload = jsonEncode({
       'directory': directory,
       'own': own,
       'outbox': outbox,
+      'inbox': ?inbox,
+      'transfers': ?transfers,
     });
     final bytes = utf8.encode(payload);
     if (bytes.length > 4 * 1024 * 1024) {

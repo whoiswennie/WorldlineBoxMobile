@@ -8,13 +8,68 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import 'app_brand.dart';
 import 'mobile_api.dart';
 import 'profile.dart';
 
-final _publicHostname = RegExp(
-  r'^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+'
-  r'[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$',
-);
+class ComputerInvitation {
+  ComputerInvitation._(this.code, this.computer);
+  final String code;
+  final HostProfile computer;
+
+  factory ComputerInvitation.parse(
+    String text,
+    String token, {
+    HostProfile? saved,
+  }) {
+    final data = jsonDecode(text) as Json;
+    final code = data['code'] as String;
+    final fingerprint = data['fingerprint'] as String;
+    final host = data['host'] as String;
+    final port = data['sshPort'] as int;
+    final transport = data['transport'];
+    if (data['protocol'] != 2 ||
+        data['apiPort'] != 47831 ||
+        !RegExp(r'^[a-f0-9]{64}$').hasMatch(code) ||
+        !RegExp(r'^SHA256:[A-Za-z0-9+/]{43}$').hasMatch(fingerprint) ||
+        !(transport == 'wss' && port == 443 && validRemoteHost(host) ||
+            transport == null && validPort(port) && validLanHost(host))) {
+      throw const FormatException();
+    }
+    if (saved != null && saved.fingerprint != fingerprint) {
+      throw const MobileException('这个二维码属于另一台电脑。请扫描「我的电脑」上的二维码。');
+    }
+    final lan = object(data['lan']);
+    final hints = <LanEndpoint>[
+      if (validPort(lan['port']) && lan['hosts'] is List)
+        for (final ip
+            in (lan['hosts'] as List)
+                .whereType<String>()
+                .where(validLanHost)
+                .take(8))
+          (host: ip, port: lan['port'] as int),
+      if (transport == null) (host: host, port: port),
+    ];
+    final profile =
+        saved ??
+        HostProfile(
+          host: host,
+          sshPort: port,
+          username: 'mobile',
+          fingerprint: fingerprint,
+          apiPort: 47831,
+          token: token,
+          transport: transport as String?,
+        );
+    return ComputerInvitation._(
+      code,
+      profile.withRoutes(
+        remote: transport == 'wss' ? host : null,
+        local: hints,
+      ),
+    );
+  }
+}
 
 String connectionError(Object error) {
   if (error is MobileException) return error.message;
@@ -25,7 +80,13 @@ String connectionError(Object error) {
 }
 
 class PairingPage extends StatefulWidget {
-  const PairingPage({super.key, required this.onSave, this.initialError});
+  const PairingPage({
+    super.key,
+    required this.onSave,
+    this.initialError,
+    this.saved,
+  });
+  final HostProfile? saved;
   final Future<void> Function(HostProfile, MobileApi) onSave;
   final String? initialError;
 
@@ -89,52 +150,30 @@ class _PairingPageState extends State<PairingPage> {
 
   Future<void> _pair(String text) async {
     if (_busy) return;
-    late final Json details;
-    late final String code;
-    late final String host;
-    late final int port;
-    late final String fingerprint;
+    late final ComputerInvitation invitation;
     try {
-      details = jsonDecode(text) as Json;
-      code = details['code'] as String;
-      host = details['host'] as String;
-      port = details['sshPort'] as int;
-      fingerprint = details['fingerprint'] as String;
-      final transport = details['transport'];
-      if (details['protocol'] != 2 ||
-          details['apiPort'] != 47831 ||
-          (transport != null && transport != 'wss') ||
-          (transport == 'wss' ? port != 443 : port != 47832) ||
-          !RegExp(r'^[a-f0-9]{64}$').hasMatch(code) ||
-          !RegExp(r'^SHA256:[A-Za-z0-9+/]{43}$').hasMatch(fingerprint) ||
-          (transport == 'wss'
-              ? !_publicHostname.hasMatch(host)
-              : InternetAddress.tryParse(host)?.type !=
-                    InternetAddressType.IPv4)) {
-        throw const FormatException();
+      if (_attemptCode != text) {
+        _attemptCode = text;
+        final random = Random.secure();
+        _attemptToken = List.generate(
+          32,
+          (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+        ).join();
       }
-    } catch (_) {
-      setState(() => _error = '请扫描世界线盒子「远程连接」里显示的二维码。');
+      invitation = ComputerInvitation.parse(
+        text,
+        _attemptToken!,
+        saved: widget.saved,
+      );
+    } catch (error) {
+      setState(
+        () => _error = error is MobileException
+            ? error.message
+            : '请扫描电脑「设置 → 手机连接」里的二维码。',
+      );
       return;
     }
     _lastCode = text;
-    if (_attemptCode != code) {
-      _attemptCode = code;
-      final random = Random.secure();
-      _attemptToken = List.generate(
-        32,
-        (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-      ).join();
-    }
-    final profile = HostProfile(
-      host: host,
-      sshPort: port,
-      username: 'mobile',
-      fingerprint: fingerprint,
-      apiPort: 47831,
-      token: _attemptToken!,
-      transport: details['transport'] as String?,
-    );
     setState(() {
       _busy = true;
       _error = null;
@@ -142,12 +181,12 @@ class _PairingPageState extends State<PairingPage> {
     MobileApi? unclaimed;
     try {
       final api = unclaimed = await MobileApi.connect(
-        profile,
-        pairingCode: code,
+        invitation.computer,
+        pairingCode: widget.saved == null ? invitation.code : null,
         deviceName: 'Android 手机',
       );
       if (mounted) {
-        await widget.onSave(profile, api);
+        await widget.onSave(api.profile, api);
         unclaimed = null;
       }
     } catch (error) {
@@ -160,7 +199,7 @@ class _PairingPageState extends State<PairingPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('世界线盒子')),
+    appBar: AppBar(title: const BrandTitle()),
     body: SafeArea(
       child: Center(
         child: ConstrainedBox(
@@ -168,14 +207,32 @@ class _PairingPageState extends State<PairingPage> {
           child: ListView(
             padding: const EdgeInsets.all(24),
             children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: Icon(Icons.devices_rounded, size: 32),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
               Text(
-                '连接电脑',
+                widget.saved == null ? '连接电脑' : '更新连接地址',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 8),
-              const Text('在电脑上打开「设置 → 远程连接」，显示配对二维码。'),
+              Text(
+                widget.saved == null
+                    ? '打开电脑「设置 → 手机连接」并扫码。下次在同一局域网，手机会自动连接。'
+                    : '扫描这台电脑的新二维码，更新远程地址并保留已有配对。',
+              ),
               const SizedBox(height: 24),
               if (_showCamera) ...[
                 AspectRatio(

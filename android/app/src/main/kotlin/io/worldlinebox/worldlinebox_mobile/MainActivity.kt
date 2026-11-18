@@ -32,6 +32,8 @@ class MainActivity : FlutterActivity() {
     private var recordPermission: MethodChannel.Result? = null
     private var speech: MobileSpeech? = null
     private var ringtone: MediaPlayer? = null
+    private var messages: PartnerMessages? = null
+    private val localComputers by lazy { LocalComputerDiscovery(this) }
 
     private fun stopRingtone() {
         ringtone?.release()
@@ -41,6 +43,13 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         val messenger = engine.dartExecutor.binaryMessenger
+        messages = PartnerMessages(this, MethodChannel(messenger, "worldlinebox/messages"))
+        MethodChannel(messenger, "worldlinebox/local-computers").setMethodCallHandler { call, result ->
+            val name = call.arguments as? String
+            if (call.method == "find" && name != null && Regex("wlb-[0-9a-f]{24}").matches(name)) {
+                localComputers.find(name, result)
+            } else result.notImplemented()
+        }
         MethodChannel(messenger, "worldlinebox/pet-ringtone").setMethodCallHandler { call, result ->
             when (call.method) {
                 "play" -> {
@@ -315,7 +324,13 @@ class MainActivity : FlutterActivity() {
         catch (error: Exception) { pending.error("microphone", error.message, null) }
     }
 
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); messages?.accept(intent) }
+    override fun onResume() { super.onResume(); messages?.resumed(true) }
+    override fun onPause() { messages?.resumed(false); super.onPause() }
+
     override fun onDestroy() {
+        messages?.close()
+        localComputers.close()
         stopRingtone()
         speech?.close()
         speech = null

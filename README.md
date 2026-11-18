@@ -1,12 +1,18 @@
-# 世界线盒子 · 手机端
+# 世界线盒子 Android 客户端
 
-WorldlineBox Mobile `0.1.2` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
+WorldlineBox Mobile `0.3.0` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
-[下载 Android 0.1.2 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.2) · [下载 Windows 0.1.2 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.2) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+[下载 Android 0.3.0 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.3.0) · [下载 Windows 0.3.0 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.3.0) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
 - 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
 - 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置大肥鱼（DeepSeek-chan）和月见八千代的 Live2D。与桌面版配对后，进入对应伙伴的桌宠会面即可加载自己的模型，播放中的语音可以驱动口型。
 - 手机缓存近期会话及本机待发消息。连接恢复时重试待发消息，并从已确认的上传位置继续传文件。
+
+## 消息与附件
+
+首页的版本号来自当前安装包。会话列表按伙伴统计未读消息。在其他聊天里收到回复时可点「查看」切换。电脑「设置 → 手机连接 → 已配对设备」显示在线状态，找到本机后开启「信息推送」，并允许 Android 通知。后台连接会在通知栏显示，点击伙伴消息即可回到对应聊天。系统的勿扰或省电设置可能影响提醒，强行停止 App 后需再次打开。
+
+搭配新版电脑端，每个附件最多 4 GiB。手机按网速调整分段，断线后继续传已选文件。电脑保留未完成的分段 24 小时；手机重启后，原文件仍在本机时可继续。上传完的附件回到该会话的输入框，确认后发送。大文件可以下载原件，用作任务输入。
 
 ## 语音
 
@@ -33,12 +39,12 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 ## 扫码连接
 
 1. 安装 Windows x64 版 WorldlineBox，在启动器选择共享 DSH 实例，在「设置 → 全局模型」配置聊天模型。先在电脑验证一次伙伴回复。
-2. 电脑打开「设置 → 远程连接」，点「显示配对二维码」。手机从 Release 下载并安装 `WorldlineBoxMobile.apk`，打开 App 扫码。手机保存设备凭据，在入口可用期间自动连接。
+2. 电脑打开「设置 → 手机连接」，点「显示配对二维码」。手机从 Release 下载并安装 `WorldlineBoxMobile.apk`，打开 App 扫码。手机保存电脑指纹及授权。回家时优先局域网直连，出门后自动尝试远程地址。
 3. 打开伙伴聊天，发送文字或通过「＋」选择文件。伙伴在电脑完成后，可在手机打开或保存交付的附件。电脑端可以暂停设备、允许重连或撤销授权。撤销后需要重新扫码。
 
 从源码启动电脑端时，使用相邻 `WorldlineBox` 项目中的 `02-Start-Development.bat`。也可以用该项目的 Windows 安装器 `out/make/inno/WorldlineBoxSetup.exe` 更新桌面端。
 
-手机只需要安装世界线盒子。家中电脑无需公网 IP、端口映射或 VPN 客户端。电脑上的 WorldlineBox 需保持运行。公网入口转发端到端加密的 SSH 流量。Cloudflare Quick Tunnel 用于临时联调，重启后会换地址。长期使用需要部署下文的固定公网入口。
+手机安装「世界线盒子」。家中电脑无需公网 IP、端口映射或 VPN 客户端。电脑上的 WorldlineBox 需保持运行。在允许设备互访的家庭 Wi-Fi 或有线局域网中，App 自动发现电脑的新地址，双方重启后可直接重连。Windows 防火墙需要允许该应用在专用网络上通信。访客 Wi-Fi 隔离可能阻止直连。公网入口转发端到端加密的 SSH 流量。Cloudflare Quick Tunnel 用于临时联调，重启后会换地址。外地连接不上时，在手机的设备菜单「我的电脑 → 扫码更新地址」扫描电脑的新二维码，也可从相册选择。已有设备授权和局域网连接都会保留。固定公网地址可按下文配置。
 
 [Cloudflare Quick Tunnel 说明](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
 

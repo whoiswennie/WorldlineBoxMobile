@@ -11,6 +11,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(home: PairingPage(onSave: (_, _) async {})),
     );
+    expect(find.text('世界线盒子'), findsOneWidget);
     expect(find.text('连接电脑'), findsOneWidget);
     expect(find.text('扫描二维码'), findsOneWidget);
     expect(find.text('从相册选择二维码'), findsOneWidget);
