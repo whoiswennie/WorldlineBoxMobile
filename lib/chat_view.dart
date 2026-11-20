@@ -46,8 +46,8 @@ extension _WorkspaceView on _CompanionWorkspaceState {
           actions: [
             if (room != null && _api?.supportsTopicApps == true)
               IconButton(
-                tooltip: '话题应用',
-                icon: Semantics(label: '话题应用', child: ExcludeSemantics(child: Badge(
+                tooltip: '聊天应用',
+                icon: Semantics(label: '聊天应用', child: ExcludeSemantics(child: Badge(
                   isLabelVisible: (_runtime['apps'] as List? ?? []).isNotEmpty,
                   label: Text('${(_runtime['apps'] as List? ?? []).length}'),
                   child: const Icon(Icons.apps_outlined),
@@ -92,6 +92,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                     ],
                   ),
                 ),
+              IconButton(tooltip: '切换电脑', onPressed: _manageHosts, icon: const Icon(Icons.devices_outlined)),
               PopupMenuButton<String>(
                 tooltip: '我的电脑',
                 icon: const Icon(Icons.more_horiz_rounded),
@@ -110,7 +111,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                   }
                 },
                 itemBuilder: (_) => [
-                  const PopupMenuItem(enabled: false, child: Text('我的电脑')),
+                  PopupMenuItem(enabled: false, child: Text(_profile.displayName)),
                   const PopupMenuItem(value: 'scan', child: Text('扫码更新地址')),
                   PopupMenuItem(
                     value: 'identity',
@@ -254,9 +255,14 @@ extension _WorkspaceView on _CompanionWorkspaceState {
     try {
       _editingAddress = true;
       _connectionVersion++;
-      await widget.onForget();
-      await _nativeAlert('reset');
+      final api = _api;
+      if (api != null) {
+        try { await api.releasePairing(); } catch (_) { /* Offline removal remains local. */ }
+      }
+      for (final room in _inbox.unread.keys) { await _nativeAlert('clear', '${_profile.fingerprint}/$room'); }
+      await _nativeAlert('configure', false);
       await _cache.clear();
+      if (mounted) await widget.onForget();
     } catch (error) {
       _editingAddress = false;
       _show(connectionError(error));
@@ -647,12 +653,6 @@ extension _WorkspaceView on _CompanionWorkspaceState {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_quotes[room] case final Json quote)
-                  _quotePreview(
-                    quote['senderName'] as String? ?? '伙伴',
-                    quote['content'] as String? ?? '',
-                    clear: () => _update(() => _quotes.remove(room)),
-                  ),
                 if (files.isNotEmpty)
                   SizedBox(
                     height: 43,
@@ -814,48 +814,6 @@ extension _WorkspaceView on _CompanionWorkspaceState {
     }
   }
 
-  Widget _quotePreview(String name, String text, {VoidCallback? clear}) =>
-      Padding(
-        padding: const EdgeInsets.fromLTRB(9, 3, 6, 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 2,
-              height: 25,
-              color: _accent.withValues(alpha: .55),
-            ),
-            const SizedBox(width: 7),
-            Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 11,
-                    ),
-                  ),
-                  Text(
-                    text,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-            if (clear != null)
-              IconButton(
-                tooltip: '移除引用',
-                onPressed: clear,
-                icon: const Icon(Icons.close, size: 17),
-              ),
-          ],
-        ),
-      );
-
   Widget _message(Json message) {
     final own = message['senderId'] == 'user';
     final id = message['id'] as String;
@@ -904,12 +862,6 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                   ),
                 ),
                 const SizedBox(height: 5),
-                if (object(message['quote']) case final Json quote
-                    when quote.isNotEmpty)
-                  _quotePreview(
-                    quote['senderName'] as String? ?? '伙伴',
-                    quote['excerpt'] as String? ?? '',
-                  ),
                 if (content.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -942,7 +894,13 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                   ]),
                 ...attachments.map((file) => _fileCard(message, file)),
                 for (final card in objects(message['cards']))
-                  _ChatMediaCard(
+                  if (_api == null || !(_runtime['apps'] as List? ?? []).contains(card['kind']))
+                    ListTile(
+                      dense: true,
+                      title: Text(card['title'] as String? ?? ''),
+                      subtitle: Text(_api == null ? '连接电脑后即可查看此卡片的播放状态。' : '${_topicAppNames[card['kind']]}应用已关闭，在聊天应用中启用后可播放。'),
+                    )
+                  else _ChatMediaCard(
                     key: ValueKey(card['id']),
                     card: card, api: _api, room: message['conversationId'] as String, message: id,
                     active: _playingCard == card['id'] && _api != null,
@@ -978,18 +936,6 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                               ? Icons.stop_outlined
                               : Icons.volume_up_outlined,
                         ),
-                      ),
-                      IconButton(
-                        tooltip: '引用',
-                        visualDensity: VisualDensity.compact,
-                        iconSize: 18,
-                        onPressed: () {
-                          final room = _room;
-                          if (room == null) return;
-                          _update(() => _quotes[room] = message);
-                          _composerFocus.requestFocus();
-                        },
-                        icon: const Icon(Icons.format_quote_outlined),
                       ),
                     ],
                   ),

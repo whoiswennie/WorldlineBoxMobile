@@ -1,10 +1,10 @@
 # 世界线盒子 Android 客户端
 
-WorldlineBox Mobile `0.1.4` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
+WorldlineBox Mobile `0.1.5` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
-[下载 Android 0.1.4 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.4) · [下载 Windows 0.1.5 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.5) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+[下载 Android 0.1.5 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.5) · [下载 Windows 0.1.6 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.6) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
-- 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
+- 聊天支持流式回复、执行阶段、复制和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
 - 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置大肥鱼（DeepSeek-chan）和月见八千代的 Live2D。与桌面版配对后，进入对应伙伴的桌宠会面即可加载自己的模型，播放中的语音可以驱动口型。
 - 手机缓存近期会话及本机待发消息。连接恢复时重试待发消息，并从已确认的上传位置继续传文件。
 
@@ -42,9 +42,11 @@ GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android �
 2. 电脑打开「设置 → 手机连接」，点「显示配对二维码」。手机从 Release 下载并安装 `WorldlineBoxMobile.apk`，打开 App 扫码。手机保存电脑指纹及授权。回家时优先局域网直连，出门后自动尝试远程地址。
 3. 打开伙伴聊天，发送文字或通过「＋」选择文件。伙伴在电脑完成后，可在手机打开或保存交付的附件。电脑端可以暂停设备、允许重连或撤销授权。撤销后需要重新扫码。
 
+点会话首页右上角的「切换电脑」可添加、切换电脑或清理失效连接。每台电脑分别保存配对、聊天草稿、未发送消息和未读状态。进入伙伴聊天后，应用开关在该聊天的所有话题间共享，手机和电脑都可修改。
+
 从源码启动电脑端时，使用相邻 `WorldlineBox` 项目中的 `02-Start-Development.bat`。也可以用该项目的 Windows 安装器 `out/make/inno/WorldlineBoxSetup.exe` 更新桌面端。
 
-手机安装「世界线盒子」。家中电脑无需公网 IP、端口映射或 VPN 客户端。电脑上的 WorldlineBox 需保持运行。在允许设备互访的家庭 Wi-Fi 或有线局域网中，App 自动发现电脑的新地址，双方重启后可直接重连。Windows 防火墙需要允许该应用在专用网络上通信。访客 Wi-Fi 隔离可能阻止直连。公网入口转发端到端加密的 SSH 流量。Cloudflare Quick Tunnel 用于临时联调，重启后会换地址。外地连接不上时，在手机的设备菜单「我的电脑 → 扫码更新地址」扫描电脑的新二维码，也可从相册选择。已有设备授权和局域网连接都会保留。固定公网地址可按下文配置。
+手机安装「世界线盒子」。家中电脑无需公网 IP、端口映射或 VPN 客户端。电脑上的 WorldlineBox 需保持运行。在允许设备互访的家庭 Wi-Fi 或有线局域网中，App 自动发现电脑的新地址，双方重启后可直接重连。Windows 防火墙需要允许该应用在专用网络上通信。访客 Wi-Fi 隔离可能阻止直连。公网入口转发端到端加密的 SSH 流量。Cloudflare Quick Tunnel 用于临时联调，重启后会换地址。外地连接不上时，在手机的设备菜单「扫码更新地址」扫描电脑的新二维码，也可从相册选择。已有设备授权和局域网连接都会保留。固定公网地址可按下文配置。
 
 [Cloudflare Quick Tunnel 说明](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/)
 

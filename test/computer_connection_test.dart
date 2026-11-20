@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:worldlinebox_mobile/computer_connection.dart';
 import 'package:worldlinebox_mobile/mobile_api.dart';
@@ -31,6 +32,48 @@ void main() {
       'port': 47832,
     },
   };
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'migrates a pairing, switches independently and never restores removed or superseded routes',
+    () async {
+      FlutterSecureStorage.setMockInitialValues({
+        'worldlinebox.mobile.host.v1': jsonEncode(legacy.toJson()),
+      });
+      final store = ProfileStore();
+      final a = (await store.read()).current!;
+      expect(a.cacheIdentity, a.fingerprint);
+      final b = HostProfile.fromJson({
+        ...a.toJson(),
+        'fingerprint': 'second',
+        'token': 'second-token',
+        'separatePairingCache': true,
+      });
+      await store.pair(b);
+      final lanA = a.withRoutes(local: [(host: '192.168.1.2', port: 47832)]);
+      await store.update(lanA);
+      expect((await ProfileStore().read()).current!.fingerprint, b.fingerprint);
+      await store.select(a.fingerprint);
+      final cleaned = await store.clean({
+        lanA: lanA.withRoutes(clearRemote: true),
+      });
+      expect(cleaned.current!.remoteHost, isNull);
+      expect(cleaned.current!.localRoutes, lanA.localRoutes);
+      expect(cleaned.profiles[b.fingerprint]?.remoteHost, b.remoteHost);
+      await store.clean({lanA: null});
+      expect((await store.read()).current?.fingerprint, a.fingerprint);
+      await store.clean({cleaned.current!: null});
+      await store.update(lanA);
+      expect((await ProfileStore().read()).profiles.keys, [b.fingerprint]);
+      final fresh = HostProfile.fromJson({
+        ...b.toJson(),
+        'token': 'replacement',
+      });
+      await store.pair(fresh);
+      await store.update(b);
+      expect((await store.read()).current!.token, fresh.token);
+      expect(fresh.cacheIdentity, isNot(b.cacheIdentity));
+    },
+  );
   test(
     'remote rescan keeps legacy authorization and LAN reconnection works after DHCP and port changes',
     () async {

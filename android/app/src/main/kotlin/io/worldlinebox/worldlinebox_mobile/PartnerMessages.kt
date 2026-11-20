@@ -61,6 +61,7 @@ class PartnerMessages(private val activity: MainActivity, private val channel: M
         channel.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    "deviceName" -> result.success(Build.MODEL.take(80))
                     "version" -> result.success(activity.packageManager.getPackageInfo(activity.packageName, 0).versionName)
                     "configure" -> { enabled = call.arguments == true; updateService(); result.success(null) }
                     "settings" -> {

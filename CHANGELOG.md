@@ -1,5 +1,15 @@
 # WorldlineBox Mobile 更新记录
 
+## 0.1.5 · Android
+
+下载 `WorldlineBoxMobile.apk` 安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 10，沿用上一版发布签名。同页提供 SHA-256 校验文件。
+
+- 点会话首页右上角的「切换电脑」可添加或切换主机。手机分别保存每台电脑的聊天缓存、草稿和待发送消息。升级后会保留原有配对。
+- 一台手机可保持与多台电脑的连接，一台电脑也能连接多部手机。「清理失效连接」会检查已撤销的配对和失效的临时远程地址。暂时离线的主机可以在恢复连接后继续使用。
+- 与 Windows 0.1.6 配对后，音乐、视频等应用开关在同一聊天的各个话题中生效。任一端关闭应用后，旧卡片会提示重新启用。伙伴消息下方提供复制和朗读。
+
+[下载配套 Windows 版](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.6) · [查看代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.4...0.1.5)
+
 ## 0.1.4 · Android
 
 下载 `WorldlineBoxMobile.apk` 即可安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 9，沿用上一版发布签名。同页提供 SHA-256 校验文件。

@@ -147,6 +147,7 @@ class MobileApi {
       api.supportsTopicApps = health['topicApps'] == true;
       api.pagedSpeech = health['pagedSpeech'] == true;
       api.profile = profile.withRoutes(
+        computerName: health['computerName'] as String?,
         remote: validRemoteHost(health['remoteHost'])
             ? health['remoteHost'] as String
             : null,
@@ -168,6 +169,26 @@ class MobileApi {
     }
   }
 
+  Future<void> releasePairing() async { await _json('DELETE', 'profile'); }
+
+  // Only a positive acknowledgement from the pinned PC proves a pairing is gone.
+  // Paused, offline and older PCs cannot produce this acknowledgement.
+  static Future<bool> confirmedRemoved(HostProfile profile) async {
+    try {
+      return await connectComputer(profile, (route) async {
+        final socket = route.local
+            ? await SSHSocket.connect(route.host, route.port, timeout: const Duration(seconds: 3))
+            : await WebSocketSsh.connect(route.host);
+        final client = SSHClient(socket, username: 'check-removed',
+          onPasswordRequest: () => profile.token,
+          onVerifyHostKey: (type, fingerprint) => type == 'ssh-ed25519' && utf8.decode(fingerprint) == profile.fingerprint,
+          algorithms: const SSHAlgorithms(hostkey: [SSHHostkeyType.ed25519]),
+          handshakeTimeout: const Duration(seconds: 6), authTimeout: const Duration(seconds: 6));
+        unawaited(client.done.then<void>((_) {}, onError: (Object _) {}));
+        try { await client.authenticated; return true; } finally { client.close(); }
+      });
+    } catch (_) { return false; }
+  }
   Future<String?> currentRemoteHost() async {
     final host = (await _json('GET', 'health'))['remoteHost'];
     return validRemoteHost(host) ? host as String : null;

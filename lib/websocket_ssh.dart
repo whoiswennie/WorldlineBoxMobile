@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -49,6 +50,38 @@ class WebSocketSsh implements SSHSocket {
       client.close(force: true);
       rethrow;
     }
+  }
+
+  // Only temporary Quick Tunnels are disposable. A DNS or network failure
+  // alone is inconclusive. Check the provider's explicit no-tunnel response.
+  static Future<bool> expiredTemporaryAddress(String host) async {
+    if (!RegExp(r'^[a-z0-9-]+\.trycloudflare\.com$').hasMatch(host)) return false;
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    try {
+      final request = await client.getUrl(Uri.https(host, '/worldlinebox-ssh'));
+      request.followRedirects = false;
+      final response = await request.close().timeout(const Duration(seconds: 6));
+      if (response.statusCode != 530 || response.headers.value('cf-ray') == null) return false;
+      final bytes = <int>[];
+      await for (final chunk in response.timeout(const Duration(seconds: 5))) {
+        bytes.addAll(chunk.take(65536 - bytes.length));
+        if (bytes.length >= 65536) break;
+      }
+      return RegExp(r'\b(1033|1016)\b').hasMatch(String.fromCharCodes(bytes));
+    } on SocketException {
+      // A local DNS failure alone could just mean the phone is offline.
+      try {
+        final lookup = await client.getUrl(Uri.https('cloudflare-dns.com', '/dns-query', {'name': host, 'type': 'A'}));
+        lookup.headers.set(HttpHeaders.acceptHeader, 'application/dns-json');
+        lookup.followRedirects = false;
+        final response = await lookup.close().timeout(const Duration(seconds: 5));
+        if (response.statusCode != 200) return false;
+        final data = jsonDecode(await response.transform(utf8.decoder).join().timeout(const Duration(seconds: 5)));
+        return data is Map && data['Status'] == 3 && data['TC'] == false &&
+            data['Question'] is List && (data['Question'] as List).whereType<Map>().any((q) => q['name'] == '$host.' && q['type'] == 1) &&
+            data['Authority'] is List && (data['Authority'] as List).whereType<Map>().any((r) => r['name'] == 'trycloudflare.com.' && r['type'] == 6);
+      } catch (_) { return false; }
+    } catch (_) { return false; } finally { client.close(force: true); }
   }
 
   @override

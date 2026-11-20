@@ -32,6 +32,12 @@ extension _WorkspaceAlerts on _CompanionWorkspaceState {
       if (!mounted) return;
       if (tap != null && tap['host'] == _profile.fingerprint) {
         _pendingChat = tap;
+      } else if (tap != null) {
+        await _cacheReady;
+        if (!mounted) return;
+        await _saveCache(requireDisk: true);
+        if (mounted) await widget.switchFromNotification(tap);
+        return;
       }
       _openPendingChat();
       _markVisible();

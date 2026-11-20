@@ -41,11 +41,19 @@ class CompanionWorkspace extends StatefulWidget {
     super.key,
     required this.profile,
     required this.onForget,
+    required this.replacePairing,
+    required this.manageHosts,
+    required this.switchFromNotification,
+    this.initialNotification,
     required this.saveProfile,
     this.initialConnection,
   });
   final HostProfile profile;
+  final Future<void> Function(bool online) manageHosts;
+  final Future<void> Function(Json) switchFromNotification;
+  final Json? initialNotification;
   final Future<void> Function() onForget;
+  final Future<void> Function(HostProfile, MobileApi) replacePairing;
   final Future<void> Function(HostProfile) saveProfile;
   final MobileApi? initialConnection;
 
@@ -58,7 +66,6 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _speech = MobileSpeech();
-  final _quotes = <String, Json>{};
   String? _readingMessage;
   String? _recordingRoom;
   bool _dictating = false;
@@ -94,7 +101,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   Json _directory = {};
   Json _snapshot = {};
   Json _identity = {};
-  late final _cache = ChatCache(widget.profile.fingerprint);
+  late final _cache = ChatCache(widget.profile.cacheIdentity);
   final _own = <String, List<Json>>{};
   final _recent = <String, Map<String, Json>>{};
   final _cursor = <String, int>{};
@@ -154,6 +161,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pendingChat = widget.initialNotification;
     _cacheReady = _restoreCache();
     messageChannel.setMethodCallHandler((call) async {
       if (call.method == 'open') await _takeChat();
@@ -331,6 +339,15 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     }
   }
 
+  Future<void> _manageHosts() async {
+    try {
+      await _cacheReady;
+      if (!mounted) return;
+      await _saveCache(requireDisk: true);
+      if (mounted) await widget.manageHosts(_online);
+    } catch (_) { if (mounted) _show('无法保存连接或聊天缓存，请重试。'); }
+  }
+
   Future<void> _scanAddress() async {
     if (_editingAddress) return;
     _editingAddress = true;
@@ -346,7 +363,11 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
                 await api.close();
                 return;
               }
-              await _useConnection(api);
+              if (profile.token != _profile.token) {
+                await widget.replacePairing(profile, api);
+              } else {
+                await _useConnection(api);
+              }
               if (page.mounted) Navigator.pop(page);
             },
           ),
@@ -510,6 +531,8 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         };
         if (room != null) {
           if (state['hasMore'] case final bool more) _moreHistory = more;
+          final enabled = object(state['chatRuntime'])['apps'] as List? ?? [];
+          if (_playingCard != null && !enabled.any((id) => _playingCard!.startsWith('$id-'))) _playingCard = null;
           _snapshot = state;
           _appState.value = _runtime;
           final messages = _recent.putIfAbsent(room, () => {});
@@ -675,14 +698,12 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     if (room == null || _sending || _roomUploading || _changingTopic) return;
     final text = _composer.text.trim();
     final ids = (_attachments[room] ?? []).map((file) => file['id']).toList();
-    final quote = _quotes[room];
     if (text.isEmpty && ids.isEmpty) return;
     final fields = <String, dynamic>{
       'conversationId': room,
       'content': text,
       'attachmentIds': ids,
       'delivery': delivery,
-      if (quote?['id'] case final String quoteId) 'quoteMessageId': quoteId,
       if (object(_runtime['topic'])['id'] case final String topic)
         'topicId': topic,
     };
@@ -698,7 +719,6 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       await _saveCache(requireDisk: true);
       if (!mounted) return;
       setState(() {
-        if (identical(_quotes[room], quote)) _quotes.remove(room);
         if (_drafts[room]?.trim() == text) _drafts.remove(room);
         if (_room == room && _composer.text.trim() == text) _composer.clear();
       });
@@ -1104,6 +1124,9 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       final inbox = object(saved['inbox']);
       _inbox.restore(inbox);
       final transfers = object(saved['transfers']);
+      for (final entry in object(transfers['textDrafts']).entries) {
+        if (entry.value is String) _drafts.putIfAbsent(entry.key, () => entry.value as String);
+      }
       for (final entry in object(transfers['pending']).entries) {
         _uploads[entry.key] = object(entry.value);
       }
@@ -1123,7 +1146,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         }
       }
     });
-    if (_pushEnabled) await _nativeAlert('configure', true);
+    await _nativeAlert('configure', _pushEnabled);
     _openPendingChat();
     unawaited(_resumeUploads());
     unawaited(_flushOutbox());
@@ -1172,6 +1195,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   }
 
   Json get _transferJournal => {
+    'textDrafts': Map.of(_drafts),
     'pending': Map.of(_uploads),
     'drafts': {
       for (final e in _attachments.entries)
@@ -1225,9 +1249,6 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         transfers: _transferJournal,
         inbox: {..._inbox.toJson(), 'pushEnabled': _pushEnabled},
       );
-      final support = await getApplicationSupportDirectory();
-      final models = Directory('${support.path}/pet-model-files');
-      if (await models.exists()) await models.delete(recursive: true);
       if (!mounted) return;
       setState(() {
         _own.clear();

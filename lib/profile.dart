@@ -23,12 +23,22 @@ class HostProfile {
     required this.fingerprint,
     required this.apiPort,
     required this.token,
+    this.name = '',
+    this.separatePairingCache = false,
     this.privateKey = '',
     this.transport,
     this.passphrase = '',
     this.lanEndpoints = const [],
   });
 
+  final String name;
+  final bool separatePairingCache;
+  String get cacheIdentity => separatePairingCache
+      ? discoveryName + sha256.convert(utf8.encode(token)).toString()
+      : fingerprint;
+  String get displayName => name.isNotEmpty
+      ? name
+      : localRoutes.firstOrNull?.host ?? remoteHost ?? '已配对电脑';
   final String host;
   final int sshPort;
   final String username;
@@ -49,15 +59,25 @@ class HostProfile {
 
   HostProfile withRoutes({
     String? remote,
+    String? computerName,
+    bool clearRemote = false,
     Iterable<LanEndpoint> local = const [],
   }) {
     final lan = {...local, ...localRoutes}.take(8).toList();
-    final publicHost = remote ?? remoteHost;
+    final publicHost = clearRemote ? null : remote ?? remoteHost;
     return HostProfile(
-      host: publicHost ?? lan.first.host,
-      sshPort: publicHost == null ? lan.first.port : 443,
-      transport: publicHost == null ? null : 'wss',
+      name: computerName?.trim().isNotEmpty == true
+          ? computerName!.trim()
+          : name,
+      host: publicHost ?? lan.firstOrNull?.host ?? '',
+      sshPort: publicHost == null ? lan.firstOrNull?.port ?? 0 : 443,
+      transport: publicHost != null
+          ? 'wss'
+          : lan.isEmpty
+          ? 'discovery'
+          : null,
       lanEndpoints: lan,
+      separatePairingCache: separatePairingCache,
       username: username,
       fingerprint: fingerprint,
       apiPort: apiPort,
@@ -68,6 +88,8 @@ class HostProfile {
   }
 
   Map<String, dynamic> toJson() => {
+    'name': name,
+    'separatePairingCache': separatePairingCache,
     'host': host,
     'sshPort': sshPort,
     'username': username,
@@ -84,6 +106,8 @@ class HostProfile {
   };
 
   factory HostProfile.fromJson(Map<String, dynamic> json) => HostProfile(
+    separatePairingCache: json['separatePairingCache'] == true,
+    name: json['name'] as String? ?? '',
     host: json['host'] as String,
     sshPort: json['sshPort'] as int,
     username: json['username'] as String,
@@ -101,27 +125,106 @@ class HostProfile {
   );
 }
 
+class HostDirectory {
+  HostDirectory(this.profiles, this.active);
+  final Map<String, HostProfile> profiles;
+  String? active;
+  HostProfile? get current => profiles[active];
+}
+
 class ProfileStore {
   static const _storage = FlutterSecureStorage();
-  static const _key = 'worldlinebox.mobile.host.v1';
-
-  Future<HostProfile?> read() async {
-    final text = await _storage.read(key: _key);
-    return text == null
-        ? null
-        : HostProfile.fromJson(jsonDecode(text) as Map<String, dynamic>);
-  }
-
+  static const _legacy = 'worldlinebox.mobile.host.v1';
+  static const _key = 'worldlinebox.mobile.computers.v2';
   Future<void> _writes = Future.value();
-  Future<void> _enqueue(Future<void> Function() work) {
-    final next = _writes.then((_) => work());
-    _writes = next.catchError((Object _) {});
-    return next;
+
+  Future<HostDirectory> _read() async {
+    final raw = await _storage.read(key: _key);
+    if (raw != null) {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final all = (data['profiles'] as List).cast<Map<String, dynamic>>().map(
+        HostProfile.fromJson,
+      );
+      return HostDirectory({
+        for (final p in all) p.fingerprint: p,
+      }, data['active'] as String?);
+    }
+    final old = await _storage.read(key: _legacy);
+    if (old == null) return HostDirectory({}, null);
+    final profile = HostProfile.fromJson(jsonDecode(old));
+    final migrated = HostDirectory({
+      profile.fingerprint: profile,
+    }, profile.fingerprint);
+    await _write(migrated);
+    await _storage.delete(key: _legacy);
+    return migrated;
   }
 
-  Future<void> save(HostProfile profile) => _enqueue(
-    () => _storage.write(key: _key, value: jsonEncode(profile.toJson())),
+  Future<void> _write(HostDirectory records) => _storage.write(
+    key: _key,
+    value: jsonEncode({
+      'active': records.active,
+      'profiles': records.profiles.values.map((p) => p.toJson()).toList(),
+    }),
   );
 
-  Future<void> forget() => _enqueue(() => _storage.delete(key: _key));
+  Future<HostDirectory> _run([void Function(HostDirectory)? edit]) {
+    final result = _writes.then((_) async {
+      final records = await _read();
+      if (edit != null) {
+        edit(records);
+        await _write(records);
+      }
+      return records;
+    });
+    _writes = result.then<void>((_) {}, onError: (Object _) {});
+    return result;
+  }
+
+  Future<HostDirectory> read() => _run();
+  Future<HostDirectory> pair(HostProfile p) => _run((d) {
+    d.profiles[p.fingerprint] = p;
+    d.active = p.fingerprint;
+  });
+  Future<HostDirectory> select(String id) => _run((d) {
+    if (!d.profiles.containsKey(id)) throw StateError('这台电脑的配对已移除。');
+    d.active = id;
+  });
+  Future<void> update(HostProfile p) async {
+    await _run((d) {
+      if (d.profiles[p.fingerprint]?.token == p.token) {
+        d.profiles[p.fingerprint] = p;
+      }
+    });
+  }
+
+  Future<HostDirectory> forget(String id) => _run((d) {
+    d.profiles.remove(id);
+    if (d.active == id) d.active = d.profiles.keys.firstOrNull;
+  });
+
+  Future<HostDirectory> clean(Map<HostProfile, HostProfile?> changes) =>
+      _run((d) {
+        for (final entry in changes.entries) {
+          final old = entry.key;
+          final current = d.profiles[old.fingerprint];
+          if (current == null ||
+              current.token != old.token ||
+              current.remoteHost != old.remoteHost) {
+            continue;
+          }
+          if (entry.value == null) {
+            d.profiles.remove(old.fingerprint);
+          } else {
+            d.profiles[old.fingerprint] = current.withRoutes(
+              remote: entry.value!.remoteHost,
+              clearRemote: entry.value!.remoteHost == null,
+              local: entry.value!.localRoutes,
+            );
+          }
+        }
+        if (!d.profiles.containsKey(d.active)) {
+          d.active = d.profiles.keys.firstOrNull;
+        }
+      });
 }

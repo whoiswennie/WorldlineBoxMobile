@@ -11,7 +11,8 @@ class ChatCache {
 
   final String identity;
   final File? _override;
-  Future<void> _pending = Future.value();
+  static final _pending = <String, Future<void>>{};
+  String get _queueKey => _override?.absolute.path ?? identity;
   late final Future<File> _file = _locate();
 
   Future<File> _locate() async {
@@ -23,6 +24,7 @@ class ChatCache {
 
   Future<Json> read() async {
     try {
+      await _pending[_queueKey];
       final file = await _file;
       if (!await file.exists() || await file.length() > 4 * 1024 * 1024) {
         return {};
@@ -72,8 +74,14 @@ class ChatCache {
   });
 
   Future<void> _enqueue(Future<void> Function(File) operation) {
-    final work = _pending.then((_) async => operation(await _file));
-    _pending = work.catchError((Object _) {});
+    final key = _queueKey;
+    final work = (_pending[key] ?? Future<void>.value()).then(
+      (_) async => operation(await _file),
+    );
+    final settled = _pending[key] = work.catchError((Object _) {});
+    settled.then((_) {
+      if (identical(_pending[key], settled)) _pending.remove(key);
+    });
     return work;
   }
 }

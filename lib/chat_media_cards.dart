@@ -93,8 +93,8 @@ extension _TopicAppPicker on _CompanionWorkspaceState {
                 shrinkWrap: true,
                 children: [
                   const ListTile(
-                    title: Text('话题应用'),
-                    subtitle: Text('可同时启用多个应用，选择会同步到电脑。'),
+                    title: Text('聊天应用'),
+                    subtitle: Text('可同时启用多个应用。选择会同步到当前电脑，在这个聊天的各个话题中生效。'),
                   ),
                   for (final entry in _topicAppNames.entries)
                     SwitchListTile(

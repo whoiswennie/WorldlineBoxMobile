@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:flutter/services.dart';
 
 import 'app_brand.dart';
 import 'mobile_api.dart';
@@ -59,6 +60,7 @@ class ComputerInvitation {
           fingerprint: fingerprint,
           apiPort: 47831,
           token: token,
+          separatePairingCache: true,
           transport: transport as String?,
         );
     return ComputerInvitation._(
@@ -85,8 +87,10 @@ class PairingPage extends StatefulWidget {
     required this.onSave,
     this.initialError,
     this.saved,
+    this.known = const {},
   });
   final HostProfile? saved;
+  final Map<String, HostProfile> known;
   final Future<void> Function(HostProfile, MobileApi) onSave;
   final String? initialError;
 
@@ -150,7 +154,8 @@ class _PairingPageState extends State<PairingPage> {
 
   Future<void> _pair(String text) async {
     if (_busy) return;
-    late final ComputerInvitation invitation;
+    late ComputerInvitation invitation;
+    HostProfile? saved;
     try {
       if (_attemptCode != text) {
         _attemptCode = text;
@@ -160,10 +165,11 @@ class _PairingPageState extends State<PairingPage> {
           (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
         ).join();
       }
+      saved = widget.saved ?? widget.known[object(jsonDecode(text))['fingerprint']];
       invitation = ComputerInvitation.parse(
         text,
         _attemptToken!,
-        saved: widget.saved,
+        saved: saved,
       );
     } catch (error) {
       setState(
@@ -180,11 +186,13 @@ class _PairingPageState extends State<PairingPage> {
     });
     MobileApi? unclaimed;
     try {
-      final api = unclaimed = await MobileApi.connect(
-        invitation.computer,
-        pairingCode: widget.saved == null ? invitation.code : null,
-        deviceName: 'Android 手机',
-      );
+      if (saved != null && await MobileApi.confirmedRemoved(invitation.computer)) {
+        invitation = ComputerInvitation.parse(text, _attemptToken!);
+        saved = null;
+      }
+      final String? model = await const MethodChannel('worldlinebox/messages').invokeMethod<String>('deviceName').catchError((_) => null);
+      final api = unclaimed = await MobileApi.connect(invitation.computer,
+        pairingCode: saved == null ? invitation.code : null, deviceName: model ?? 'Android 手机');
       if (mounted) {
         await widget.onSave(api.profile, api);
         unclaimed = null;
