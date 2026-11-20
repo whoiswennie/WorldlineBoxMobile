@@ -1,5 +1,15 @@
 # WorldlineBox Mobile 更新记录
 
+## 0.1.4 · Android
+
+下载 `WorldlineBoxMobile.apk` 即可安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 9，沿用上一版发布签名。同页提供 SHA-256 校验文件。
+
+- 聊天中可查看伙伴分享的视频封面、标题、UP 主和音乐曲目。在卡片里播放视频、听歌或切换曲目。历史卡片点按后播放。视频支持全屏和返回原卡片，也可点「用哔哩哔哩打开」在已安装的客户端观看对应视频和分 P。
+- 配对 Windows 0.1.5 后，点聊天右上角的「话题应用」可同时启用音乐、视频、浏览器、资产库和小屋世界。任一端的修改会同步到同一个话题，浏览器可从电脑已打开的标签页中选择。
+- 手机在本机播放媒体，卡片里的视频采用哔哩哔哩官方嵌入播放器。可播放的内容与清晰度取决于平台提供的权限。
+
+[下载配套 Windows 版](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.5) · [查看代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.3...0.1.4)
+
 ## 0.1.3 · Android
 
 下载 `WorldlineBoxMobile.apk` 即可安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 8，沿用上一版发布签名。同页提供 SHA-256 校验文件。

@@ -43,6 +43,7 @@ class MobileApi {
   int maxUploadBytes = 0;
   int uploadChunkBytes = 256 * 1024;
   bool supportsInbox = false;
+  bool supportsTopicApps = false;
   bool downloadsOriginal = false;
   bool pagedSpeech = false;
 
@@ -143,6 +144,7 @@ class MobileApi {
       api.maxUploadBytes = health['maxUploadBytes'] as int;
       api.downloadsOriginal = health['downloadOriginal'] == true;
       api.supportsInbox = health['inbox'] == true;
+      api.supportsTopicApps = health['topicApps'] == true;
       api.pagedSpeech = health['pagedSpeech'] == true;
       api.profile = profile.withRoutes(
         remote: validRemoteHost(health['remoteHost'])
@@ -318,6 +320,14 @@ class MobileApi {
 
   Future<Json> uploadStatus(String room, String id) =>
       _json('GET', 'upload', query: {'conversationId': room, 'id': id});
+
+  Future<Json> browserTabs(String room, {String? tabId}) =>
+      _json('GET', 'browser-tabs', query: {'conversationId': room, 'tabId': ?tabId});
+
+  Future<Json> cardMusic(String room, String message, String card, {String? track}) =>
+      _json('GET', 'card-music', query: {
+        'conversationId': room, 'messageId': message, 'cardId': card, 'trackId': ?track,
+      });
 
   Future<Json> stickers(String room, {String? packId}) => _json(
     'GET',

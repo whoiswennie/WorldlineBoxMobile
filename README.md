@@ -1,8 +1,8 @@
 # 世界线盒子 Android 客户端
 
-WorldlineBox Mobile `0.1.3` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
+WorldlineBox Mobile `0.1.4` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
-[下载 Android 0.1.3 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.3) · [下载 Windows 0.1.3 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.3) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+[下载 Android 0.1.4 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.4) · [下载 Windows 0.1.5 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.5) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
 - 聊天支持流式回复、执行阶段、复制、引用和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
 - 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置大肥鱼（DeepSeek-chan）和月见八千代的 Live2D。与桌面版配对后，进入对应伙伴的桌宠会面即可加载自己的模型，播放中的语音可以驱动口型。

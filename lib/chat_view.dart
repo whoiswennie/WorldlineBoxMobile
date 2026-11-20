@@ -44,6 +44,16 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                   ],
                 ),
           actions: [
+            if (room != null && _api?.supportsTopicApps == true)
+              IconButton(
+                tooltip: '话题应用',
+                icon: Semantics(label: '话题应用', child: ExcludeSemantics(child: Badge(
+                  isLabelVisible: (_runtime['apps'] as List? ?? []).isNotEmpty,
+                  label: Text('${(_runtime['apps'] as List? ?? []).length}'),
+                  child: const Icon(Icons.apps_outlined),
+                ))),
+                onPressed: _changingTopic ? null : () => _chooseApp(room),
+              ),
             if (room != null && current?['kind'] == 'direct')
               IconButton(
                 tooltip: '桌宠视频通话',
@@ -547,10 +557,15 @@ extension _WorkspaceView on _CompanionWorkspaceState {
               : ListView.builder(
                   controller: _scroll,
                   padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
-                  itemCount: messages.length + pending.length,
-                  itemBuilder: (context, index) => index < messages.length
-                      ? _message(messages[index])
-                      : _pendingBubble(pending[index - messages.length]),
+                  itemCount: messages.length + pending.length + (_moreHistory ? 1 : 0),
+                  itemBuilder: (context, row) {
+                    if (_moreHistory && row == 0) {
+                      return TextButton(onPressed: _loadingHistory ? null : _loadEarlier,
+                          child: Text(_loadingHistory ? '正在读取…' : '查看更早的消息'));
+                    }
+                    final index = row - (_moreHistory ? 1 : 0);
+                    return index < messages.length ? _message(messages[index]) : _pendingBubble(pending[index - messages.length]);
+                  },
                 ),
         ),
         if (messages.isNotEmpty || pending.isNotEmpty)
@@ -610,6 +625,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
           onChanged: (topic) async {
             if (_room != room) return;
             if (topic.isNotEmpty) {
+              _playingCard = null;
               _update(
                 () => _snapshot = {
                   ..._snapshot,
@@ -846,7 +862,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
     final sender = message['senderName'] as String? ?? (own ? '你' : '伙伴');
     final active = ['queued', 'running'].contains(message['status']);
     final content =
-        (active ? _streaming[id] ?? message['content'] : message['content'])
+        (active ? _streaming[id] ?? message['displayContent'] ?? message['content'] : message['displayContent'] ?? message['content'])
             as String? ??
         '';
     final execution = object(message['execution']);
@@ -862,6 +878,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
         ? ''
         : '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
     return Padding(
+      key: ValueKey(id),
       padding: const EdgeInsets.only(bottom: 20),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -918,7 +935,19 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                             imageBuilder: (_, _, _) => const Text('[图片链接]'),
                           ),
                   ),
+                if (message['apps'] case final List apps when own && apps.isNotEmpty)
+                  Wrap(spacing: 5, children: [
+                    for (final app in apps.whereType<String>())
+                      if (_topicAppNames[app] case final String name) Chip(label: Text(name)),
+                  ]),
                 ...attachments.map((file) => _fileCard(message, file)),
+                for (final card in objects(message['cards']))
+                  _ChatMediaCard(
+                    key: ValueKey(card['id']),
+                    card: card, api: _api, room: message['conversationId'] as String, message: id,
+                    active: _playingCard == card['id'] && _api != null,
+                    select: (play) => _update(() => _playingCard = play ? card['id'] as String : null),
+                  ),
                 if (!own &&
                     message['status'] == 'sent' &&
                     content.trim().isNotEmpty)

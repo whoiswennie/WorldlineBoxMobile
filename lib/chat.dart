@@ -28,6 +28,7 @@ import 'pairing.dart';
 import 'profile.dart';
 
 part 'chat_view.dart';
+part 'chat_media_cards.dart';
 part 'chat_controls.dart';
 part 'chat_alerts.dart';
 part 'pet_call.dart';
@@ -102,6 +103,11 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   int _outboxBackoff = 0;
   bool _draining = false;
   String? _room;
+  String? _playingCard;
+  final _olderMessages = <String, Json>{};
+  bool _moreHistory = false;
+  bool _loadingHistory = false;
+  final _appState = ValueNotifier<Json>({});
   String? _error;
   bool _contacts = false;
   bool _connecting = false;
@@ -126,7 +132,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   List<Json> get _messages {
     final hidden = (_runtime['hiddenMessageIds'] as List?)?.toSet() ?? {};
     final byId = <String, Json>{
-      for (final message in [...?_own[_room], ...?_recent[_room]?.values])
+      for (final message in [..._olderMessages.values, ...?_own[_room], ...?_recent[_room]?.values])
         message['id'] as String: message,
     };
     return byId.values
@@ -137,6 +143,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
               (m['status'] != 'sent' ||
                   m['content'] != '' ||
                   objects(m['attachments']).isNotEmpty ||
+                  objects(m['cards']).isNotEmpty ||
                   m['execution'] != null),
         )
         .toList()
@@ -168,6 +175,9 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if ((state == AppLifecycleState.paused || state == AppLifecycleState.hidden || state == AppLifecycleState.detached) && _playingCard != null) {
+      setState(() => _playingCard = null);
+    }
     if (state == AppLifecycleState.resumed) {
       unawaited(_takeChat());
       if (_online) {
@@ -205,6 +215,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     _outboxRetry?.cancel();
     unawaited(_events?.cancel());
     unawaited(_api?.close());
+    _appState.dispose();
     _composer.dispose();
     _composerFocus.dispose();
     unawaited(_speech.stop());
@@ -268,6 +279,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     _retry?.cancel();
     setState(() {
       _api = api;
+      _playingCard = null;
       _reconnectFailures = 0;
       _error = null;
       _imageCache.clear();
@@ -389,6 +401,12 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
                     event['text'] as String,
               );
               if (follow) _jumpToLatest();
+            } else if (event['type'] == 'music-present' || event['type'] == 'video-present') {
+              if (event['surface'] == 'chat' && room != null && _visibleRoom == room &&
+                  event['conversationId'] == room && event['cardId'] is String) {
+                setState(() => _playingCard = event['cardId'] as String);
+                unawaited(_refresh(jump: true));
+              }
             } else if (event['type'] == 'progress') {
               setState(
                 () => _liveProgress[event['messageId'] as String] = object(
@@ -434,6 +452,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       final value = await api.request('state', {
         'conversationId': ?room,
         'after': ?_cursor[room],
+        if (room != null && _cursor[room] == null && api.supportsTopicApps) 'history': true,
         if (api.supportsInbox) 'inboxAfter': _inbox.cursor ?? -1,
         if (room != null)
           'tracked': (_recent[room]?.values ?? const <Json>[])
@@ -490,7 +509,9 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
           'conversations': state['conversations'],
         };
         if (room != null) {
+          if (state['hasMore'] case final bool more) _moreHistory = more;
           _snapshot = state;
+          _appState.value = _runtime;
           final messages = _recent.putIfAbsent(room, () => {});
           for (final message in objects(state['messages'])) {
             messages[message['id'] as String] = message;
@@ -540,6 +561,32 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     }
   }
 
+  Future<void> _loadEarlier() async {
+    final room = _room, api = _api;
+    if (room == null || api == null || _loadingHistory) return;
+    final loaded = [..._olderMessages.values, ...?_recent[room]?.values];
+    if (loaded.isEmpty) return;
+    final before = loaded.map((m) => m['sequence'] as int).reduce(min);
+    final generation = _roomGeneration;
+    setState(() => _loadingHistory = true);
+    try {
+      final result = await api.request('state', {'conversationId': room, 'history': true, 'before': before});
+      if (!mounted || generation != _roomGeneration) return;
+      final state = object(result['snapshot']);
+      final page = objects(state['messages']);
+      setState(() {
+        for (final message in page) {
+          _olderMessages[message['id'] as String] = message;
+        }
+        _moreHistory = page.isNotEmpty && state['hasMore'] == true;
+      });
+    } catch (error) {
+      if (mounted && generation == _roomGeneration) _show(error.toString());
+    } finally {
+      if (mounted && generation == _roomGeneration) setState(() => _loadingHistory = false);
+    }
+  }
+
   bool get _nearBottom =>
       !_scroll.hasClients || _scroll.position.extentAfter < 100;
 
@@ -563,7 +610,13 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     _roomGeneration++;
     setState(() {
       _room = room;
+      _olderMessages.clear();
+      _moreHistory = false;
+      _loadingHistory = false;
+      _cursor.remove(room);
+      _playingCard = null;
       _snapshot = {};
+      _appState.value = {};
       _streaming.clear();
       _liveProgress.clear();
       _imageCache.clear();

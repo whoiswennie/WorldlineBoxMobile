@@ -43,6 +43,26 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
         val messenger = engine.dartExecutor.binaryMessenger
+        engine.platformViewsController.registry.registerViewFactory("worldlinebox/chat-media", ChatMediaFactory(this, messenger))
+        MethodChannel(messenger, "worldlinebox/bilibili").setMethodCallHandler { call, result ->
+            if (call.method != "open") { result.notImplemented(); return@setMethodCallHandler }
+            val video = call.argument<String>("videoId").orEmpty()
+            val page = call.argument<Int>("page") ?: 1
+            if (!Regex("BV[A-Za-z0-9]{10}|(?:av|ep|ss)[1-9][0-9]{0,16}").matches(video) || page !in 1..10000) {
+                result.error("invalid", "视频编号无效。", null)
+                return@setMethodCallHandler
+            }
+            val path = if (video.startsWith("ep") || video.startsWith("ss")) "bangumi/play" else "video"
+            val uri = android.net.Uri.parse("https://www.bilibili.com/$path/$video?p=$page")
+            for (app in listOf("tv.danmaku.bili", "tv.danmaku.bilibilihd", "com.bilibili.app.in", "com.bilibili.app.blue")) {
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(app))
+                    result.success(true)
+                    return@setMethodCallHandler
+                } catch (_: android.content.ActivityNotFoundException) { /* Try the next edition. */ }
+            }
+            result.success(false)
+        }
         messages = PartnerMessages(this, MethodChannel(messenger, "worldlinebox/messages"))
         MethodChannel(messenger, "worldlinebox/local-computers").setMethodCallHandler { call, result ->
             val name = call.arguments as? String
