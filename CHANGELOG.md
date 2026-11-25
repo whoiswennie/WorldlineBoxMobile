@@ -1,5 +1,16 @@
 # WorldlineBox Mobile 更新记录
 
+## 0.1.6 · Android
+
+下载 `WorldlineBoxMobile.apk` 安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 12。下载页同时提供 SHA-256 校验文件。
+
+- 在「附近的电脑」按名称选择同一局域网中的主机，首次配对时核对连接码并在电脑上同意。再次回到该网络时，手机可以自动重连。
+- 点聊天输入框旁的「＋」即可拍照、录像，或按手机相册浏览和混选图片、视频。选好的附件可以和文字一起发送。
+- 点开收到的附件即可放大图片、逐页查看 PDF 或阅读文本。再次查看时会复用手机上已缓存的原件，点保存按钮即可另存到手机。
+- 进入会话时直接显示最新消息。发送普通消息时，聊天里正在播放的音乐或视频会继续，开始新的播放时再切换。
+
+[下载配套 Windows 版](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.9) · [查看代码差异](https://github.com/whoiswennie/WorldlineBoxMobile/compare/0.1.5...0.1.6)
+
 ## 0.1.5 · Android
 
 下载 `WorldlineBoxMobile.apk` 安装或覆盖升级。支持 Android 7.0 及以上，内部版本号为 10，沿用上一版发布签名。同页提供 SHA-256 校验文件。

@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show Factory;
 import 'package:flutter/gestures.dart'
@@ -14,7 +15,6 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import 'mobile_api.dart';
@@ -23,11 +23,14 @@ import 'message_inbox.dart';
 import 'resumable_upload.dart';
 import 'mobile_speech.dart';
 import 'pet_call_bubble.dart';
+import 'attachment_cache.dart';
+import 'chat_attachment_picker.dart';
 import 'chat_cache.dart';
 import 'pairing.dart';
 import 'profile.dart';
 
 part 'chat_view.dart';
+part 'attachment_preview.dart';
 part 'chat_media_cards.dart';
 part 'chat_controls.dart';
 part 'chat_alerts.dart';
@@ -70,13 +73,14 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   String? _recordingRoom;
   bool _dictating = false;
   final _search = TextEditingController();
-  final _scroll = ScrollController();
+  final _scroll = ScrollController(keepScrollOffset: false);
   final _drafts = <String, String>{};
   final _attachments = <String, List<Json>>{};
   final _outbox = <String, Json>{};
   final _streaming = <String, String>{};
   final _liveProgress = <String, Json>{};
   final _downloading = <String>{};
+  final _downloadPercent = <String, int>{};
   final _cancelledDownloads = <String>{};
   final _imageCache = <String, Future<Uint8List>>{};
   MobileApi? _api;
@@ -101,6 +105,8 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   Json _directory = {};
   Json _snapshot = {};
   Json _identity = {};
+  late final _originals = AttachmentCache(widget.profile.fingerprint, widget.profile.token);
+  final _openingAttachments = <String>{};
   late final _cache = ChatCache(widget.profile.cacheIdentity);
   final _own = <String, List<Json>>{};
   final _recent = <String, Map<String, Json>>{};
@@ -110,7 +116,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   int _outboxBackoff = 0;
   bool _draining = false;
   String? _room;
-  String? _playingCard;
+  ({String id, String kind})? _playingCard;
   final _olderMessages = <String, Json>{};
   bool _moreHistory = false;
   bool _loadingHistory = false;
@@ -123,6 +129,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   bool _changingTopic = false;
   double? _uploadProgress;
   final _uploads = <String, Json>{};
+  Json? _pendingCapture;
   String? _uploadId;
   bool _uploadWaiting = false;
   int _roomGeneration = 0;
@@ -139,7 +146,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   List<Json> get _messages {
     final hidden = (_runtime['hiddenMessageIds'] as List?)?.toSet() ?? {};
     final byId = <String, Json>{
-      for (final message in [..._olderMessages.values, ...?_own[_room], ...?_recent[_room]?.values])
+      for (final message in [...?_own[_room], if (!_online) ..._originals.offlineMessages(_room), ..._olderMessages.values, ...?_recent[_room]?.values])
         message['id'] as String: message,
     };
     return byId.values
@@ -425,7 +432,8 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
             } else if (event['type'] == 'music-present' || event['type'] == 'video-present') {
               if (event['surface'] == 'chat' && room != null && _visibleRoom == room &&
                   event['conversationId'] == room && event['cardId'] is String) {
-                setState(() => _playingCard = event['cardId'] as String);
+                final kind = event['type'] == 'music-present' ? 'music' : 'video';
+                setState(() => _playingCard = (id: event['cardId'] as String, kind: kind));
                 unawaited(_refresh(jump: true));
               }
             } else if (event['type'] == 'progress') {
@@ -488,7 +496,6 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
           generation != _refreshGeneration) {
         return;
       }
-      final follow = jump || _nearBottom;
       final state = object(value['snapshot']);
       final rooms = objects(state['conversations']);
       final page = object(state['inbox']);
@@ -523,7 +530,8 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       if (_pushEnabled != wasEnabled) {
         await _nativeAlert('configure', _pushEnabled);
       }
-      if (!mounted) return;
+      if (!mounted || !identical(_api, api) || room != _room) return;
+      if (room != null && (jump || _nearBottom)) _jumpToLatest();
       setState(() {
         _directory = {
           'companions': state['companions'],
@@ -531,23 +539,38 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         };
         if (room != null) {
           if (state['hasMore'] case final bool more) _moreHistory = more;
-          final enabled = object(state['chatRuntime'])['apps'] as List? ?? [];
-          if (_playingCard != null && !enabled.any((id) => _playingCard!.startsWith('$id-'))) _playingCard = null;
-          _snapshot = state;
+          final runtime = object(state['chatRuntime']);
+          final apps = runtime['apps'] as List?;
+          if (apps != null && _playingCard != null && !apps.contains(_playingCard!.kind)) {
+            _playingCard = null;
+          }
+          _snapshot = {
+            ...state,
+            'chatRuntime': {
+              if (state['chatRuntime'] == null) ..._runtime,
+              if (apps == null && _runtime.containsKey('apps')) 'apps': _runtime['apps'],
+              ...runtime,
+            },
+          };
           _appState.value = _runtime;
           final messages = _recent.putIfAbsent(room, () => {});
           for (final message in objects(state['messages'])) {
             messages[message['id'] as String] = message;
           }
+          final activeCard = _playingCard;
+          final playingMessage = activeCard == null ? null : messages.values.where((message) =>
+              objects(message['cards']).any((card) => card['id'] == activeCard.id)).firstOrNull;
           final ordered = messages.values.toList()
             ..sort(
               (a, b) => (b['sequence'] as int).compareTo(a['sequence'] as int),
             );
           _recent.remove(room);
-          _recent[room] = {
+          final recent = _recent[room] = {
             for (final message in ordered.take(70))
               message['id'] as String: message,
           };
+          // Keep the playing native view mounted when its row ages out of the recent page.
+          if (playingMessage != null) recent[playingMessage['id'] as String] = playingMessage;
           while (_recent.length > 8) {
             final old = _recent.keys.first;
             _recent.remove(old);
@@ -573,7 +596,6 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       } else {
         _scheduleCache();
       }
-      if (room != null && follow) _jumpToLatest();
     } catch (error) {
       if (!mounted || room != _room || generation != _refreshGeneration) return;
       if (error is MobileException && error.status != null) {
@@ -611,16 +633,19 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   }
 
   bool get _nearBottom =>
-      !_scroll.hasClients || _scroll.position.extentAfter < 100;
+      !_scroll.hasClients || _scroll.position.extentBefore < 100;
 
-  void _jumpToLatest() => WidgetsBinding.instance.addPostFrameCallback((_) {
-    if (mounted && _scroll.hasClients) {
-      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+  void _jumpToLatest() {
+    if (!_scroll.hasClients) return;
+    final position = _scroll.position;
+    if (position.hasContentDimensions && position.pixels != position.minScrollExtent) {
+      position.jumpTo(position.minScrollExtent);
     }
-  });
+  }
 
   void _selectRoom(String? room) {
     if (_room == room) {
+      if (room != null) _jumpToLatest();
       _markVisible();
       return;
     }
@@ -648,8 +673,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     _markVisible();
     _composer.text = _drafts[room] ?? '';
     _watchRoom();
-    _jumpToLatest();
-    unawaited(_refresh(jump: true));
+    unawaited(_refresh());
   }
 
   void _show(String text) {
@@ -882,43 +906,104 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     final api = _api;
     final room = _room;
     if (api == null || room == null || _uploading || _sending) return;
+    await _cacheReady;
+    if (!mounted || room != _room || _uploading || _sending) return;
+    final limit = _remainingAttachments(room);
+    if (limit <= 0) {
+      _show('每条消息最多 16 个附件。');
+      return;
+    }
     setState(() => _uploading = true);
     try {
-      final selection = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        withData: false,
-      );
-      if (selection == null || !mounted) return;
-      for (final file in selection.files) {
-        if ((_attachments[room]?.length ?? 0) +
-                _uploads.values.where((u) => u['room'] == room).length >=
-            16) {
-          _show('每条消息最多 16 个附件。');
-          break;
-        }
-        if (file.path == null || file.size > api.maxUploadBytes) {
-          _show(
-            '${file.name} · ${file.path == null ? "无法读取文件" : "单个文件最多 ${api.maxUploadBytes ~/ 1048576} MiB"}',
-          );
-          continue;
-        }
-        final stat = await File(file.path!).stat();
-        _uploads[_uuid.v4()] = {
-          'name': file.name,
-          'path': file.path,
-          'size': stat.size,
-          'modified': stat.modified.millisecondsSinceEpoch,
+      final source = await chooseAttachmentSource(context);
+      if (source == null || !mounted || _room != room) return;
+      if (source.isCamera) {
+        _pendingCapture = {
+          'id': _uuid.v4(),
           'room': room,
+          'video': source == ChatAttachmentSource.movie,
+          'time': DateTime.now().millisecondsSinceEpoch,
+          'limit': api.maxUploadBytes,
         };
+        await _saveCache(requireDisk: true);
+        if (mounted) await _finishCapture(recover: false);
+      } else {
+        final files = await pickChatFiles(context, source, limit);
+        for (final file in files) {
+          if (!mounted) return;
+          if (_remainingAttachments(room) <= 0) {
+            _show('每条消息最多 16 个附件。');
+            break;
+          }
+          await _stageAttachment(room, _uuid.v4(), file, api.maxUploadBytes);
+        }
       }
-      await _saveCache(requireDisk: true);
     } catch (error) {
-      _show(connectionError(error));
+      _showAttachmentError(error);
     } finally {
       if (mounted) {
-        setState(() => _uploading = false);
-        unawaited(_resumeUploads());
+        _pendingCapture = null;
+        try {
+          await _saveCache(requireDisk: true);
+        } on FileSystemException {
+          _show('手机空间不足，退出应用前请等待附件上传完成。');
+        }
+        if (mounted) {
+          setState(() => _uploading = false);
+          unawaited(_resumeUploads());
+        }
       }
+    }
+  }
+
+  int _remainingAttachments(String room) => 16 - (_attachments[room]?.length ?? 0) -
+      _uploads.values.where((job) => job['room'] == room).length;
+
+  void _showAttachmentError(Object error) {
+    _show(switch (error) {
+      MobileException() => error.message,
+      PlatformException(code: 'camera_access_denied') => '请在手机设置中允许使用相机，再重新拍摄。',
+      PlatformException(code: 'no_available_camera') => '手机上没有可用的相机应用。',
+      FileSystemException() => '无法读写附件，请检查可用空间后重试。',
+      _ => '未能读取附件，请重新选择或拍摄。',
+    });
+  }
+
+  Future<bool> _stageAttachment(String room, String id, PickedAttachment file,
+      int maxBytes, {bool camera = false}) async {
+    final path = file.path;
+    final stat = path == null ? null : await File(path).stat();
+    if (!mounted) return false;
+    if (stat == null || stat.type != FileSystemEntityType.file) {
+      _show('${file.name} · 无法读取文件');
+      return false;
+    }
+    if (stat.size > maxBytes) {
+      _show('${file.name} · 单个文件最多 ${maxBytes ~/ 1048576} MiB');
+      return false;
+    }
+    _uploads[id] = {
+      'room': room, 'name': file.name, 'path': path, 'size': stat.size,
+      'modified': stat.modified.millisecondsSinceEpoch,
+      if (camera) 'camera': true,
+    };
+    return true;
+  }
+
+  Future<void> _finishCapture({required bool recover}) async {
+    final capture = _pendingCapture!;
+    final id = capture['id'] as String;
+    final video = capture['video'] as bool;
+    final room = capture['room'] as String;
+    final file = recover ? await ChatCamera.recover(id) : await ChatCamera.capture(id, video);
+    if (!mounted || file == null) return;
+    final name = ChatCamera.name(file, video, capture['time'] as int);
+    final staged = await _stageAttachment(room, id, (name: name, path: file.path),
+        capture['limit'] as int, camera: true);
+    if (!mounted) return;
+    if (recover && staged && _room == null) _pendingChat ??= {'room': room};
+    if (!staged) {
+      await ChatCamera.discardTempFile(file.path);
     }
   }
 
@@ -969,6 +1054,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         if (!mounted) return;
         _uploads.remove(id);
         await _saveCache();
+        if (job['camera'] == true) await ChatCamera.discardTempFile(job['path'] as String);
       }
     } finally {
       if (mounted) {
@@ -995,10 +1081,16 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
 
   Future<Uint8List> _loadImage(Json message, Json attachment) async {
     final api = _api!;
+    final thumbnail = api.attachmentThumbnails && attachment['previewUrl'] != null;
+    if (!thumbnail) {
+      final original = await _originals.obtain(message, attachment, (file) => _fetchOriginal(message, attachment, file));
+      return original.file.readAsBytes();
+    }
     final response = await api.download(
       message['conversationId'] as String,
       message['id'] as String,
       attachment['id'] as String,
+      thumbnail: true,
     );
     final bytes = BytesBuilder(copy: false);
     await for (final chunk in response.timeout(const Duration(seconds: 30))) {
@@ -1010,108 +1102,112 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     return bytes.takeBytes();
   }
 
-  Future<void> _download(Json message, Json attachment) async {
+  Future<void> _fetchOriginal(Json message, Json attachment, File file) async {
     final api = _api;
-    if (api == null) return;
-    final messageId = message['id'] as String;
-    final id = attachment['id'] as String;
-    final key = '$messageId/$id';
-    if (_downloading.contains(key)) return;
-    setState(() => _downloading.add(key));
-    Directory? temporary;
-    try {
-      final name = (attachment['name'] as String).replaceAll(
-        RegExp(r'[/\\<>:"|?*\x00-\x1f]'),
-        '_',
+    if (api == null) throw const MobileException('请先连接电脑以获取附件原件。');
+    final messageId = message['id'] as String, id = attachment['id'] as String;
+    final key = attachmentCacheKey(message, attachment);
+    final size = attachment['size'] as int;
+    if (size == 0) {
+      final response = await api.download(
+        message['conversationId'] as String,
+        messageId,
+        id,
       );
-      temporary = await (await getTemporaryDirectory()).createTemp(
-        'worldlinebox-download-',
-      );
-      final file = File('${temporary.path}${Platform.pathSeparator}attachment');
-      await file.create();
-      final size = attachment['size'] as int;
-      if (size == 0) {
-        final response = await api.download(
+      await for (final bytes in response.timeout(const Duration(seconds: 60))) {
+        if (bytes.isNotEmpty) throw const MobileException('文件大小校验失败。');
+      }
+    }
+    int failures = 0;
+    while (mounted &&
+        !_cancelledDownloads.contains(key) &&
+        await file.length() < size) {
+      final offset = await file.length();
+      try {
+        final active = _api;
+        if (active == null) throw const SocketException('offline');
+        final response = await active.download(
           message['conversationId'] as String,
           messageId,
           id,
+          offset: offset,
         );
-        await response.drain<void>();
-      }
-      int failures = 0;
-      while (mounted &&
-          !_cancelledDownloads.contains(key) &&
-          await file.length() < size) {
-        final offset = await file.length();
+        if (response.statusCode == 206 &&
+            response.headers.value(HttpHeaders.contentRangeHeader) !=
+                'bytes $offset-${size - 1}/$size') {
+          throw const MobileException('下载分段与原文件不一致。', status: 400);
+        }
+        final append = response.statusCode == 206;
+        final output = await file.open(
+          mode: append ? FileMode.append : FileMode.write,
+        );
+        var written = append ? offset : 0;
         try {
-          final active = _api;
-          if (active == null) throw const SocketException('offline');
-          final response = await active.download(
-            message['conversationId'] as String,
-            messageId,
-            id,
-            offset: offset,
-          );
-          if (response.statusCode == 206 &&
-              response.headers.value(HttpHeaders.contentRangeHeader) !=
-                  'bytes $offset-${size - 1}/$size') {
-            throw const MobileException('下载分段与原文件不一致。', status: 400);
-          }
-          final append = response.statusCode == 206;
-          final output = await file.open(
-            mode: append ? FileMode.append : FileMode.write,
-          );
-          var written = append ? offset : 0;
-          try {
-            await for (final bytes in response.timeout(
-              const Duration(seconds: 60),
-            )) {
-              if (!mounted || _cancelledDownloads.contains(key)) return;
-              written += bytes.length;
-              if (written > size) {
-                throw const MobileException('文件大小校验失败。', status: 400);
-              }
-              await output.writeFrom(bytes);
+          await for (final bytes in response.timeout(
+            const Duration(seconds: 60),
+          )) {
+            if (!mounted || _cancelledDownloads.contains(key)) throw const MobileException('附件传输已取消。');
+            written += bytes.length;
+            if (written > size) {
+              throw const MobileException('文件大小校验失败。', status: 400);
             }
-          } finally {
-            await output.close();
+            await output.writeFrom(bytes);
+            final percent = written * 100 ~/ size;
+            if (mounted && _downloading.contains(key) && _downloadPercent[key] != percent) setState(() => _downloadPercent[key] = percent);
           }
-          if (written != size) {
-            throw const SocketException('incomplete transfer');
-          }
-        } catch (error) {
-          if (error is FileSystemException ||
-              error is MobileException &&
-                  error.status != null &&
-                  error.status! < 500) {
-            rethrow;
-          }
-          if (await file.length() > offset) failures = 0;
-          failures++;
-          await Future<void>.delayed(Duration(seconds: min(15, failures)));
+        } finally {
+          await output.close();
         }
-      }
-      if (!mounted || _cancelledDownloads.contains(key)) return;
-      if (attachment['sha256'] case final String expected) {
-        final actual = await sha256.bind(file.openRead()).first;
-        if (actual.toString() != expected) {
-          throw const MobileException('文件内容校验失败。');
+        if (written != size) {
+          throw const SocketException('incomplete transfer');
         }
+      } catch (error) {
+        if (!mounted || _cancelledDownloads.contains(key) || error is FileSystemException ||
+            error is MobileException &&
+                error.status != null &&
+                error.status! < 500) {
+          rethrow;
+        }
+        if (await file.length() > offset) failures = 0;
+        if (++failures >= 4) throw const MobileException('附件传输中断，请在电脑恢复连接后重试。');
+        await Future<void>.delayed(Duration(seconds: min(15, failures)));
       }
-      if (!mounted) return;
-      const files = MethodChannel('worldlinebox/mobile-files');
-      final saved = await files.invokeMethod<bool>('save', {
-        'name': name,
-        'path': file.path,
-        'mimeType': attachment['mimeType'],
+    }
+    if (!mounted || _cancelledDownloads.contains(key)) throw const MobileException('附件传输已取消。');
+  }
+
+  Future<void> _download(Json message, Json attachment, {bool preview = false}) async {
+    final key = attachmentCacheKey(message, attachment);
+    if (!_openingAttachments.add(key)) return;
+    _originals.pin(key);
+    try {
+      final cached = _originals.entries.containsKey(key);
+      if (!cached) setState(() => _downloading.add(key));
+      final original = await _originals.obtain(message, attachment, (file) async {
+        if (mounted) setState(() => _downloading.add(key));
+        await _fetchOriginal(message, attachment, file);
       });
-      if (saved == true) _show('附件已保存');
+      if (!mounted || _cancelledDownloads.contains(key)) return;
+      setState(() => _downloading.remove(key));
+      final file = original.file;
+      final name = _attachmentName(attachment).replaceAll(RegExp(r'[/\\<>:"|?*\x00-\x1f]'), '_');
+      if (!cached) await _saveCache();
+      final args = <String, dynamic>{'name': name, 'path': file.path, 'mimeType': attachment['mimeType']};
+      if (preview) {
+        if (!mounted) return;
+        await Navigator.push<bool>(context, MaterialPageRoute(
+          builder: (_) => _AttachmentPreview(file: file, args: args),
+        ));
+      } else {
+        final location = await _saveAttachment(args);
+        if (mounted && location != null) _show(location);
+      }
     } catch (error) {
       _show(connectionError(error));
     } finally {
-      try {
-        await temporary?.delete(recursive: true);
-      } catch (_) {}
+      _originals.unpin(key);
+      _openingAttachments.remove(key);
+      _downloadPercent.remove(key);
       _cancelledDownloads.remove(key);
       if (mounted) setState(() => _downloading.remove(key));
     }
@@ -1119,11 +1215,14 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
 
   Future<void> _restoreCache() async {
     final saved = await _cache.read();
+    try { await _originals.ready; } on IOException { /* Chat history can still open. */ }
     if (!mounted) return;
     setState(() {
       final inbox = object(saved['inbox']);
       _inbox.restore(inbox);
       final transfers = object(saved['transfers']);
+      _pendingCapture = transfers['camera'] is Map ? object(transfers['camera']) : null;
+      if (_pendingCapture != null) _uploading = true;
       for (final entry in object(transfers['textDrafts']).entries) {
         if (entry.value is String) _drafts.putIfAbsent(entry.key, () => entry.value as String);
       }
@@ -1146,6 +1245,20 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
         }
       }
     });
+    if (_pendingCapture != null) {
+      try {
+        await _finishCapture(recover: true);
+      } catch (error) {
+        _showAttachmentError(error);
+      } finally {
+        if (mounted) {
+          _pendingCapture = null;
+          await _saveCache();
+          if (mounted) setState(() => _uploading = false);
+        }
+      }
+    }
+    if (!mounted) return;
     await _nativeAlert('configure', _pushEnabled);
     _openPendingChat();
     unawaited(_resumeUploads());
@@ -1195,6 +1308,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
   }
 
   Json get _transferJournal => {
+    'camera': ?_pendingCapture,
     'textDrafts': Map.of(_drafts),
     'pending': Map.of(_uploads),
     'drafts': {
@@ -1241,6 +1355,8 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
     _cacheWrite?.cancel();
     _cacheWrite = null;
     try {
+      _cancelledDownloads.addAll(_downloading);
+      await _originals.clear();
       // Keep the delivery journal durable while clearing display data.
       await _cache.write(
         {},
@@ -1268,7 +1384,7 @@ class _CompanionWorkspaceState extends State<CompanionWorkspace>
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清理本地缓存'),
-        content: const Text('删除本机保存的伙伴目录和发送记录。待发送消息、配对、电脑上的消息和已另存的附件会保留。'),
+        content: const Text('删除此电脑在手机上的附件缓存、伙伴目录和发送记录。待发送消息、配对、电脑上的消息和已另存的附件会保留。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

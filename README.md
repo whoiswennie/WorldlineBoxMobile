@@ -1,8 +1,8 @@
 # 世界线盒子 Android 客户端
 
-WorldlineBox Mobile `0.1.5` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。扫码后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
+WorldlineBox Mobile `0.1.6` 是[世界线盒子桌面版](https://github.com/whoiswennie/WorldlineBox)的 Android 伙伴客户端。授权后，手机通过 SSH 连接运行中的电脑，使用现有伙伴、话题、任务与附件。DSH 和伙伴数据保留在电脑上。
 
-[下载 Android 0.1.5 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.5) · [下载 Windows 0.1.6 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.6) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
+[下载 Android 0.1.6 APK](https://github.com/whoiswennie/WorldlineBoxMobile/releases/tag/0.1.6) · [下载 Windows 0.1.9 安装包](https://github.com/whoiswennie/WorldlineBox/releases/tag/0.1.9) · [桌面端安装与使用教程](https://github.com/whoiswennie/WorldlineBox#首次使用和扫码连接)
 
 - 聊天支持流式回复、执行阶段、复制和朗读。手机支持录音转文字，识别结果进入输入框供编辑。
 - 竖屏桌宠通话支持导入背景和 DeepSeek 流式语音。安装包内置大肥鱼（DeepSeek-chan）和月见八千代的 Live2D。与桌面版配对后，进入对应伙伴的桌宠会面即可加载自己的模型，播放中的语音可以驱动口型。
@@ -13,6 +13,8 @@ WorldlineBox Mobile `0.1.5` 是[世界线盒子桌面版](https://github.com/who
 首页的版本号来自当前安装包。会话列表按伙伴统计未读消息。在其他聊天里收到回复时可点「查看」切换。电脑「设置 → 手机连接 → 已配对设备」显示在线状态，找到本机后开启「信息推送」，并允许 Android 通知。后台连接会在通知栏显示，点击伙伴消息即可回到对应聊天。系统的勿扰或省电设置可能影响提醒，强行停止 App 后需再次打开。
 
 搭配新版电脑端，每个附件最多 4 GiB。手机按网速调整分段，断线后继续传已选文件。电脑保留未完成的分段 24 小时；手机重启后，原文件仍在本机时可继续。上传完的附件回到该会话的输入框，确认后发送。大文件可以下载原件，用作任务输入。
+
+点聊天里的附件可以放大图片、逐页查看 PDF 或阅读文本。其他格式可交给手机上的应用打开。点下载图标即可保存，Android 10 及以上默认存入 `Download/WorldlineBox`。
 
 ## 语音
 
@@ -34,13 +36,13 @@ WorldlineBox Mobile `0.1.5` 是[世界线盒子桌面版](https://github.com/who
 
 从源码运行开发或打包脚本时，保留相邻的 `WorldlineBox` 桌面仓库并安装其 Node 依赖。构建直接使用此仓库内的两款授权模型，首次克隆后运行 Git LFS 拉取模型及贴图。桌面仓库的授权模型更新后，可运行 `node scripts/stage-pet-models.mjs` 同步 Android 资源。
 
-GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android 可能要求先卸载调试版再安装，此操作会清除本机配对及缓存，需重新扫码。
+GitHub Release 的 APK 使用发布签名。曾安装过调试版时，Android 可能要求先卸载调试版再安装，此操作会清除本机配对及缓存，需重新配对。
 
-## 扫码连接
+## 连接电脑
 
 1. 安装 Windows x64 版 WorldlineBox，在启动器选择共享 DSH 实例，在「设置 → 全局模型」配置聊天模型。先在电脑验证一次伙伴回复。
-2. 电脑打开「设置 → 手机连接」，点「显示配对二维码」。手机从 Release 下载并安装 `WorldlineBoxMobile.apk`，打开 App 扫码。手机保存电脑指纹及授权。回家时优先局域网直连，出门后自动尝试远程地址。
-3. 打开伙伴聊天，发送文字或通过「＋」选择文件。伙伴在电脑完成后，可在手机打开或保存交付的附件。电脑端可以暂停设备、允许重连或撤销授权。撤销后需要重新扫码。
+2. 打开手机 App，在「附近的电脑」选择同一局域网内的主机，核对连接码后在电脑上点「同意连接」。电脑名称可在「设置 → 手机连接」修改。手机保存电脑指纹及授权，回家时自动重连。需要外出访问时，在电脑启用远程入口，再用手机扫描配对二维码更新地址。
+3. 打开伙伴聊天，点「＋」可拍照、录像或添加附件。「手机相册」支持按相册浏览、预览和混选照片与视频，「本地视频」只显示视频，文档等其他附件从「手机文件」选择。选好的附件会放进当前会话的输入框，可配上文字一起发送。伙伴在电脑完成后，可在手机打开或保存交付的附件。电脑端可以暂停设备、允许重连或撤销授权。撤销后需要重新配对。
 
 点会话首页右上角的「切换电脑」可添加、切换电脑或清理失效连接。每台电脑分别保存配对、聊天草稿、未发送消息和未读状态。进入伙伴聊天后，应用开关在该聊天的所有话题间共享，手机和电脑都可修改。
 

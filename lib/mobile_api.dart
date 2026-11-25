@@ -44,6 +44,7 @@ class MobileApi {
   int uploadChunkBytes = 256 * 1024;
   bool supportsInbox = false;
   bool supportsTopicApps = false;
+  bool attachmentThumbnails = false;
   bool downloadsOriginal = false;
   bool pagedSpeech = false;
 
@@ -57,6 +58,27 @@ class MobileApi {
     (route) => _dial(profile, route, pairingCode, deviceName),
     localOnly: localOnly,
   );
+
+  static Future<MobileApi> pairNearby(HostProfile profile, String deviceName, Future<void> cancelled) async {
+    final route = (host: profile.host, port: profile.sshPort, local: true);
+    final socket = await SSHSocket.connect(route.host, route.port, timeout: const Duration(seconds: 4));
+    final client = SSHClient(socket, username: 'nearby:$deviceName',
+      onPasswordRequest: () => profile.token,
+      onVerifyHostKey: (type, fingerprint) =>
+          type == 'ssh-ed25519' && utf8.decode(fingerprint) == profile.fingerprint,
+      algorithms: const SSHAlgorithms(hostkey: [SSHHostkeyType.ed25519]),
+      handshakeTimeout: const Duration(seconds: 12), authTimeout: const Duration(seconds: 65));
+    unawaited(client.done.then<void>((_) {}, onError: (Object _) {}));
+    unawaited(cancelled.then((_) => client.close()));
+    try {
+      await client.authenticated;
+    } catch (_) {
+      throw const MobileException('电脑未批准连接，或请求已过期。请在两端核对连接码后重试。');
+    } finally {
+      client.close();
+    }
+    return _dial(profile, route, null, null);
+  }
 
   static Future<MobileApi> _dial(
     HostProfile profile,
@@ -142,6 +164,7 @@ class MobileApi {
             1024 * 1024,
           );
       api.maxUploadBytes = health['maxUploadBytes'] as int;
+      api.attachmentThumbnails = health['attachmentThumbnails'] == true;
       api.downloadsOriginal = health['downloadOriginal'] == true;
       api.supportsInbox = health['inbox'] == true;
       api.supportsTopicApps = health['topicApps'] == true;
@@ -455,11 +478,13 @@ class MobileApi {
     String messageId,
     String id, {
     int offset = 0,
+    bool thumbnail = false,
   }) async {
     final request = await _open('GET', 'files', {
       'conversationId': conversationId,
       'messageId': messageId,
       'id': id,
+      if (thumbnail) 'thumbnail': '1',
     });
     if (offset > 0) {
       request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-');

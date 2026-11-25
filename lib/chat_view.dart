@@ -261,6 +261,8 @@ extension _WorkspaceView on _CompanionWorkspaceState {
       }
       for (final room in _inbox.unread.keys) { await _nativeAlert('clear', '${_profile.fingerprint}/$room'); }
       await _nativeAlert('configure', false);
+      _cancelledDownloads.addAll(_downloading);
+      await _originals.clear();
       await _cache.clear();
       if (mounted) await widget.onForget();
     } catch (error) {
@@ -542,6 +544,13 @@ extension _WorkspaceView on _CompanionWorkspaceState {
     final pending = _outbox.entries
         .where((entry) => entry.value['conversationId'] == room)
         .toList();
+    // Row zero stays at the bottom as late-loading messages and attachments grow.
+    final messageRows = <Key, int>{
+      for (var i = 0; i < messages.length; i++)
+        ValueKey(messages[i]['id'] as String): pending.length + messages.length - 1 - i,
+      for (var i = 0; i < pending.length; i++)
+        ValueKey('pending:${pending[i].key}'): pending.length - 1 - i,
+    };
     return Column(
       children: [
         Expanded(
@@ -561,16 +570,22 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                   ),
                 )
               : ListView.builder(
+                  key: ValueKey(room),
                   controller: _scroll,
+                  reverse: true,
                   padding: const EdgeInsets.fromLTRB(14, 18, 14, 12),
                   itemCount: messages.length + pending.length + (_moreHistory ? 1 : 0),
+                  findChildIndexCallback: (key) => messageRows[key],
                   itemBuilder: (context, row) {
-                    if (_moreHistory && row == 0) {
-                      return TextButton(onPressed: _loadingHistory ? null : _loadEarlier,
-                          child: Text(_loadingHistory ? '正在读取…' : '查看更早的消息'));
+                    if (row < pending.length) {
+                      return _pendingBubble(pending[pending.length - 1 - row]);
                     }
-                    final index = row - (_moreHistory ? 1 : 0);
-                    return index < messages.length ? _message(messages[index]) : _pendingBubble(pending[index - messages.length]);
+                    final messageIndex = pending.length + messages.length - 1 - row;
+                    if (messageIndex >= 0) return _message(messages[messageIndex]);
+                    return TextButton(
+                      onPressed: _loadingHistory ? null : _loadEarlier,
+                      child: Text(_loadingHistory ? '正在读取…' : '查看更早的消息'),
+                    );
                   },
                 ),
         ),
@@ -713,7 +728,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                     ),
                     IconButton(
                       tooltip: '添加附件',
-                      onPressed: enabled ? _pickFiles : null,
+                      onPressed: enabled && !_uploading ? _pickFiles : null,
                       icon: const Icon(Icons.add_circle_outline),
                     ),
                     Expanded(
@@ -768,6 +783,7 @@ extension _WorkspaceView on _CompanionWorkspaceState {
   Widget _pendingBubble(MapEntry<String, Json> entry) {
     final error = entry.value['error'] as String?;
     return Card(
+      key: ValueKey('pending:${entry.key}'),
       child: ListTile(
         leading: Icon(error == null ? Icons.schedule : Icons.error_outline),
         title: Text(entry.value['content'] as String? ?? ''),
@@ -903,8 +919,14 @@ extension _WorkspaceView on _CompanionWorkspaceState {
                   else _ChatMediaCard(
                     key: ValueKey(card['id']),
                     card: card, api: _api, room: message['conversationId'] as String, message: id,
-                    active: _playingCard == card['id'] && _api != null,
-                    select: (play) => _update(() => _playingCard = play ? card['id'] as String : null),
+                    active: _playingCard?.id == card['id'] && _api != null,
+                    select: (play) {
+                      if (play) {
+                        _update(() => _playingCard = (id: card['id'] as String, kind: card['kind'] as String));
+                      } else if (_playingCard?.id == card['id']) {
+                        _update(() => _playingCard = null);
+                      }
+                    },
                   ),
                 if (!own &&
                     message['status'] == 'sent' &&
@@ -1040,70 +1062,44 @@ extension _WorkspaceView on _CompanionWorkspaceState {
   }
 
   Widget _fileCard(Json message, Json file) {
-    final key = '${message['id']}/${file['id']}';
-    final image =
-        (file['mimeType'] as String? ?? '').startsWith('image/') &&
-        (file['size'] as int? ?? 0) <= 4 * 1024 * 1024;
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (image && _online && _imageCache.containsKey(key))
-            FutureBuilder<Uint8List>(
-              future: _imageCache.putIfAbsent(key, () {
-                if (_imageCache.length >= 24) {
-                  _imageCache.remove(_imageCache.keys.first);
-                }
-                return _loadImage(message, file);
-              }),
-              builder: (context, snapshot) {
-                final bytes = snapshot.data;
-                if (bytes == null) return const SizedBox.shrink();
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(
-                    bytes,
-                    width: 175,
-                    height: 140,
-                    fit: BoxFit.contain,
-                    cacheWidth: 520,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
-                );
-              },
-            ),
-          OutlinedButton.icon(
-            onPressed: _downloading.contains(key)
-                ? () => _update(() => _cancelledDownloads.add(key))
-                : _online && (file['storage'] != 'external' || _api!.downloadsOriginal) ? () => _download(message, file) : null,
-            icon: Icon(
-              _downloading.contains(key)
-                  ? Icons.cancel_outlined
-                  : Icons.download_outlined,
-              size: 18,
-            ),
-            label: Text(
-              _downloading.contains(key) ? '取消下载 · ${file['name']}' : file['name'] as String? ?? '附件',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
+    final key = attachmentCacheKey(message, file);
+    final cached = _originals.entries[key];
+    final name = _attachmentName(file);
+    final size = file['size'] as int? ?? 0;
+    final kind = _attachmentKind(file);
+    final readable = cached != null || _online && (file['storage'] != 'external' || _api!.downloadsOriginal);
+    final busy = _downloading.contains(key);
+    final preview = readable && !busy ? () => _download(message, file, preview: true) : null;
+    final thumbnail = kind == '图片' && cached == null && _online && readable &&
+        (size <= 4 * 1024 * 1024 || _api!.attachmentThumbnails && file['previewUrl'] != null);
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 340),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (kind == '图片' && cached != null)
+            InkWell(onTap: preview, child: Image.file(cached.file, width: double.infinity, height: 150,
+              cacheWidth: 640, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink())),
+          if (thumbnail) FutureBuilder<Uint8List>(
+            future: _imageCache.putIfAbsent(key, () {
+              if (_imageCache.length >= 12) _imageCache.remove(_imageCache.keys.first);
+              return _loadImage(message, file);
+            }),
+            builder: (_, snapshot) => snapshot.hasData ? InkWell(onTap: preview,
+              child: Image.memory(snapshot.data!, width: double.infinity, height: 150, cacheWidth: 640,
+                fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink())) : const SizedBox.shrink(),
           ),
-          if (image &&
-              _online &&
-              !_imageCache.containsKey(key) &&
-              file['storage'] != 'external')
-            TextButton.icon(
-              icon: const Icon(Icons.image_outlined, size: 17),
-              label: const Text('预览图片'),
-              onPressed: () => _update(() {
-                if (_imageCache.length >= 12) {
-                  _imageCache.remove(_imageCache.keys.first);
-                }
-                _imageCache[key] = _loadImage(message, file);
-              }),
-            ),
-        ],
+          ListTile(contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+            onTap: preview, leading: Icon(kind == '图片' ? Icons.image_outlined : Icons.insert_drive_file_outlined),
+            title: Text(name, maxLines: 2, overflow: TextOverflow.ellipsis),
+            subtitle: Text(busy ? '传输中 · ${_downloadPercent[key] ?? 0}%' :
+              '$kind · ${_fileSize(size)} · ${cached != null ? '已缓存' : readable ? '点按查看' : '暂不可用'}'),
+            trailing: IconButton(tooltip: busy ? '取消传输' : '保存到手机',
+              onPressed: busy ? () => _update(() => _cancelledDownloads.add(key)) :
+                readable ? () => _download(message, file) : null,
+              icon: Icon(busy ? Icons.close : Icons.download_outlined))),
+          if (busy) LinearProgressIndicator(value: (_downloadPercent[key] ?? 0) / 100),
+        ]),
       ),
     );
   }

@@ -42,6 +42,12 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        val previewRoot = File(cacheDir, "attachment-previews")
+        Thread {
+            val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+            previewRoot.listFiles()?.filter { it.name.startsWith("transfer-") && it.lastModified() < cutoff }
+                ?.forEach { it.deleteRecursively() }
+        }.start()
         val messenger = engine.dartExecutor.binaryMessenger
         engine.platformViewsController.registry.registerViewFactory("worldlinebox/chat-media", ChatMediaFactory(this, messenger))
         MethodChannel(messenger, "worldlinebox/bilibili").setMethodCallHandler { call, result ->
@@ -68,7 +74,8 @@ class MainActivity : FlutterActivity() {
             val name = call.arguments as? String
             if (call.method == "find" && name != null && Regex("wlb-[0-9a-f]{24}").matches(name)) {
                 localComputers.find(name, result)
-            } else result.notImplemented()
+            } else if (call.method == "nearby") localComputers.find(null, result)
+            else result.notImplemented()
         }
         MethodChannel(messenger, "worldlinebox/pet-ringtone").setMethodCallHandler { call, result ->
             when (call.method) {
@@ -267,7 +274,7 @@ class MainActivity : FlutterActivity() {
             } catch (error: Exception) { result.error("audio", error.message, null) }
         }
         MethodChannel(engine.dartExecutor.binaryMessenger, "worldlinebox/mobile-files").setMethodCallHandler { call, result ->
-            if (call.method != "save") {
+            if (call.method !in setOf("save", "quickSave", "pdfPage", "open")) {
                 result.notImplemented()
                 return@setMethodCallHandler
             }
@@ -276,6 +283,28 @@ class MainActivity : FlutterActivity() {
             if (name.isNullOrBlank() || source == null || !source.isFile ||
                 !source.path.startsWith(cacheDir.canonicalPath + File.separator)) {
                 result.error("invalid_file", "Invalid local attachment.", null)
+                return@setMethodCallHandler
+            }
+            val mime = call.argument<String>("mimeType") ?: "application/octet-stream"
+            if (call.method == "open") {
+                try {
+                    val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.attachments", source, name)
+                    startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                    result.success(true)
+                } catch (_: Exception) { result.error("no_viewer", "手机上没有可以打开此文件的应用。", null) }
+                return@setMethodCallHandler
+            }
+            if (call.method == "pdfPage" || call.method == "quickSave" && android.os.Build.VERSION.SDK_INT >= 29) {
+                val page = call.argument<Int>("page") ?: 0
+                Thread {
+                    try {
+                        val value: Any = if (call.method == "pdfPage") AttachmentFiles.pdfPage(source, page)
+                            else AttachmentFiles.saveDownload(this, source, name, mime)
+                        runOnUiThread { result.success(value) }
+                    } catch (_: Exception) {
+                        runOnUiThread { result.error("file_failed", if (call.method == "pdfPage") "无法读取 PDF 页面。" else "保存失败，请检查可用空间。", null) }
+                    }
+                }.start()
                 return@setMethodCallHandler
             }
             if (pending != null) {

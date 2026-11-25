@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 // ignore: deprecated_member_use
 import 'package:flutter/material.dart';
@@ -111,8 +112,145 @@ class _PairingPageState extends State<PairingPage> {
   bool _showCamera = false;
   bool _busy = false;
 
+  List<Json> _nearby = [];
+  final _attempts = <String, HostProfile>{};
+  Completer<void>? _cancelEnrollment;
+  Timer? _refresh;
+  bool _searching = false;
+  String? _networkStatus;
+  String? _approval;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.saved == null) {
+      unawaited(_discover());
+      _refresh = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (mounted &&
+            ModalRoute.of(context)?.isCurrent == true &&
+            WidgetsBinding.instance.lifecycleState ==
+                AppLifecycleState.resumed) {
+          unawaited(_discover());
+        }
+      });
+    }
+  }
+
+  Future<void> _discover() async {
+    if (_searching || _busy || _showCamera) return;
+    setState(() => _searching = true);
+    try {
+      final found = await const MethodChannel(
+        'worldlinebox/local-computers',
+      ).invokeListMethod<dynamic>('nearby').timeout(const Duration(seconds: 6));
+      final identities = <String>{};
+      final hosts = <Json>[
+        for (final entry in (found ?? []).whereType<Map>())
+          if (validLanHost(entry['host']) &&
+              validPort(entry['port']) &&
+              entry['fingerprint'] is String &&
+              RegExp(
+                r'^SHA256:[A-Za-z0-9+/]{43}$',
+              ).hasMatch(entry['fingerprint']) &&
+              entry['name'] is String &&
+              (entry['name'] as String).trim().isNotEmpty &&
+              identities.add(entry['fingerprint'] as String))
+            Map<String, dynamic>.from(entry),
+      ]..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      if (mounted) {
+        setState(() {
+          _nearby = hosts;
+          _networkStatus = found == null
+              ? '连接 Wi-Fi 后可发现附近电脑。'
+              : '还没有发现电脑。请确认电脑已打开 WorldlineBox，并连接同一局域网。';
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _networkStatus = '暂时无法搜索局域网，请刷新重试。');
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
+  String _newToken() {
+    final random = Random.secure();
+    return List.generate(
+      32,
+      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
+  }
+
+  Future<void> _connectNearby(Json host) async {
+    if (_busy) return;
+    final fingerprint = host['fingerprint'] as String;
+    final route = (host: host['host'] as String, port: host['port'] as int);
+    setState(() {
+      _busy = true;
+      _error = null;
+      _lastCode = null;
+    });
+    MobileApi? api;
+    try {
+      final known = (widget.known[fingerprint] ?? _attempts[fingerprint])
+          ?.withRoutes(local: [route]);
+      if (known != null && !await MobileApi.confirmedRemoved(known)) {
+        api = await MobileApi.connect(known, localOnly: true);
+      } else {
+        final token = _newToken();
+        final profile = HostProfile(
+          host: route.host,
+          sshPort: route.port,
+          apiPort: 47831,
+          username: 'mobile',
+          fingerprint: fingerprint,
+          name: host['name'],
+          token: token,
+          separatePairingCache: true,
+        );
+        final code = sha256
+            .convert(utf8.encode(fingerprint + token))
+            .toString()
+            .substring(0, 10)
+            .toUpperCase();
+        if (!mounted) return;
+        setState(() => _approval = '请在电脑上核对连接码 $code，并点击「同意连接」。');
+        final model = await const MethodChannel(
+          'worldlinebox/messages',
+        ).invokeMethod<String>('deviceName');
+        if (!mounted) return;
+        _attempts[fingerprint] = profile;
+        final cancel = _cancelEnrollment = Completer<void>();
+        api = await MobileApi.pairNearby(
+          profile,
+          model ?? 'Android 手机',
+          cancel.future,
+        );
+      }
+      if (mounted) {
+        await widget.onSave(api.profile, api);
+        api = null;
+      }
+    } catch (error) {
+      if (mounted) setState(() => _error = connectionError(error));
+    } finally {
+      if (_cancelEnrollment?.isCompleted == false) {
+        _cancelEnrollment!.complete();
+      }
+      _cancelEnrollment = null;
+      await api?.close();
+      if (mounted) {
+        setState(() {
+          _approval = null;
+          _busy = false;
+        });
+      }
+    }
+  }
+
   @override
   void dispose() {
+    if (_cancelEnrollment?.isCompleted == false) _cancelEnrollment!.complete();
+    _refresh?.cancel();
     unawaited(_scanner.dispose());
     super.dispose();
   }
@@ -159,18 +297,11 @@ class _PairingPageState extends State<PairingPage> {
     try {
       if (_attemptCode != text) {
         _attemptCode = text;
-        final random = Random.secure();
-        _attemptToken = List.generate(
-          32,
-          (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-        ).join();
+        _attemptToken = _newToken();
       }
-      saved = widget.saved ?? widget.known[object(jsonDecode(text))['fingerprint']];
-      invitation = ComputerInvitation.parse(
-        text,
-        _attemptToken!,
-        saved: saved,
-      );
+      saved =
+          widget.saved ?? widget.known[object(jsonDecode(text))['fingerprint']];
+      invitation = ComputerInvitation.parse(text, _attemptToken!, saved: saved);
     } catch (error) {
       setState(
         () => _error = error is MobileException
@@ -186,13 +317,19 @@ class _PairingPageState extends State<PairingPage> {
     });
     MobileApi? unclaimed;
     try {
-      if (saved != null && await MobileApi.confirmedRemoved(invitation.computer)) {
+      if (saved != null &&
+          await MobileApi.confirmedRemoved(invitation.computer)) {
         invitation = ComputerInvitation.parse(text, _attemptToken!);
         saved = null;
       }
-      final String? model = await const MethodChannel('worldlinebox/messages').invokeMethod<String>('deviceName').catchError((_) => null);
-      final api = unclaimed = await MobileApi.connect(invitation.computer,
-        pairingCode: saved == null ? invitation.code : null, deviceName: model ?? 'Android 手机');
+      final String? model = await const MethodChannel(
+        'worldlinebox/messages',
+      ).invokeMethod<String>('deviceName').catchError((_) => null);
+      final api = unclaimed = await MobileApi.connect(
+        invitation.computer,
+        pairingCode: saved == null ? invitation.code : null,
+        deviceName: model ?? 'Android 手机',
+      );
       if (mounted) {
         await widget.onSave(api.profile, api);
         unclaimed = null;
@@ -238,10 +375,45 @@ class _PairingPageState extends State<PairingPage> {
               const SizedBox(height: 8),
               Text(
                 widget.saved == null
-                    ? '打开电脑「设置 → 手机连接」并扫码。下次在同一局域网，手机会自动连接。'
+                    ? '选择同一局域网的电脑。首次连接需要电脑同意，以后会自动重连。'
                     : '扫描这台电脑的新二维码，更新远程地址并保留已有配对。',
               ),
               const SizedBox(height: 24),
+              if (widget.saved == null && !_showCamera) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '附近的电脑',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '刷新',
+                      onPressed: _busy || _searching ? null : _discover,
+                      icon: const Icon(Icons.refresh),
+                    ),
+                  ],
+                ),
+                if (_nearby.isEmpty)
+                  Text(_searching ? '正在搜索局域网…' : _networkStatus ?? ''),
+                for (final host in _nearby)
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.computer),
+                      title: Text(host['name']),
+                      subtitle: Text(host['host']),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _busy ? null : () => _connectNearby(host),
+                    ),
+                  ),
+                if (_approval != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: Text(_approval!),
+                  ),
+                const SizedBox(height: 20),
+              ],
               if (_showCamera) ...[
                 AspectRatio(
                   aspectRatio: 1,
